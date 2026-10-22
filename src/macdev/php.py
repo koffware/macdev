@@ -34,13 +34,13 @@ def get_installed_versions() -> list[str]:
     """Return sorted list of PHP versions installed via Homebrew."""
     result = subprocess.run(
         ["brew", "list", "--formula"],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, timeout=30,
     )
     versions = []
     for line in result.stdout.splitlines():
         line = line.strip()
         if line == "php":
-            v = _version_from_binary(BREW / "bin/php")
+            v = _version_from_binary(BREW / "opt/php/bin/php")
             if v:
                 versions.append(v)
         elif m := re.match(r"^php@(\d+\.\d+)$", line):
@@ -55,7 +55,7 @@ def get_active_version() -> str | None:
 
 def get_service_name(version: str) -> str:
     """Return the brew service name for a version, e.g. '8.2' → 'php@8.2'."""
-    head = _version_from_binary(BREW / "bin/php")
+    head = _version_from_binary(BREW / "opt/php/bin/php")
     return "php" if version == head else f"php@{version}"
 
 
@@ -99,8 +99,8 @@ def get_extra_modules(version: str) -> list[str]:
 def _version_from_binary(binary: str | Path) -> str | None:
     try:
         out = subprocess.run(
-            [str(binary), "-r", "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"],
-            capture_output=True, text=True, check=True,
+            [str(binary), "-n", "-r", "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"],
+            capture_output=True, text=True, check=True, timeout=10,
         ).stdout.strip()
         return out or None
     except Exception:
@@ -201,13 +201,56 @@ def php_switch(version: str, domain: str | None, all_vhosts: bool):
 
 
 def _switch_vhost(domain: str, socket: str):
-    conf = NGINX_SERVERS_DIR / f"{domain}.conf"
-    if not conf.exists():
-        err_console.print(f"[red]Vhost not found:[/red] {conf}")
-        sys.exit(1)
+    try:
+        changed = change_site_socket(domain, socket)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if changed:
+        console.print(f"[green]Updated[/green] {domain}: fastcgi_pass → {socket}")
+        console.print("[green]nginx reloaded.[/green]")
+    else:
+        console.print(f"[dim]{domain} already uses {socket}.[/dim]")
 
-    _update_conf(conf, socket)
-    _reload()
+
+def switch_site_php(site_id: str, version: str) -> bool:
+    """Switch a site without CLI output. Return whether its config changed."""
+    if version not in get_installed_versions():
+        raise ValueError(f"PHP {version} is not installed.")
+    socket = get_fpm_socket(version)
+    if not socket:
+        raise ValueError(f"Could not determine the FPM socket for PHP {version}.")
+    return change_site_socket(site_id, socket)
+
+
+def change_site_socket(site_id: str, socket: str) -> bool:
+    """Apply one config change, restoring its bytes if validation/reload fails."""
+    from .nginx import validate_and_reload
+    from .transactions import apply_changes, revision
+
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", site_id):
+        raise ValueError("Invalid site identifier.")
+    if socket.startswith("/"):
+        socket = f"unix:{socket}"
+    if any(character in socket for character in ";\n\r{}"):
+        raise ValueError("Unsupported FPM socket value.")
+    conf = NGINX_SERVERS_DIR / f"{site_id}.conf"
+    if conf.is_symlink():
+        raise ValueError("Switch PHP through the source configuration for linked sites.")
+    if not conf.is_file():
+        raise ValueError(f"Site not found: {site_id}")
+    original = conf.read_bytes()
+    updated, matches = re.subn(
+        rb"(^[ \t]*fastcgi_pass[ \t]+)[^;]+;",
+        lambda match: match[1] + socket.encode() + b";",
+        original,
+        flags=re.MULTILINE,
+    )
+    if not matches:
+        raise ValueError("This site has no PHP fastcgi_pass directive.")
+    if updated == original:
+        return False
+    apply_changes({conf: updated}, validate_and_reload, expected={conf: revision(original)})
+    return True
 
 
 def _switch_all_vhosts(socket: str):

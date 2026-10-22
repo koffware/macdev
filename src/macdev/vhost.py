@@ -10,6 +10,7 @@ from .config import NGINX_LOG_DIR, NGINX_SERVERS_DIR
 from .nginx import reload_nginx
 from .php import get_active_version, get_extra_modules, get_fpm_socket, get_installed_versions
 from .ssl import generate_cert
+from .sites import read_sites
 from .utils import collapse_home, console, err_console
 
 
@@ -230,13 +231,15 @@ def vhost_list():
     table.add_column("Root")
     table.add_column("PHP")
 
-    for conf in confs:
-        text = conf.read_text()
-        domain = (_extract(text, r"server_name\s+([^;]+);") or "—").strip()
-        root = (_extract(text, r"root\s+([^;]+);") or "—").strip()
-        fpm = (_extract(text, r"fastcgi_pass\s+([^;]+);") or "").strip()
-        php_version = _version_from_socket(fpm) or "—"
-        table.add_row(domain, collapse_home(root), php_version)
+    versions_by_socket = {}
+    for version in get_installed_versions():
+        socket = get_fpm_socket(version)
+        if socket:
+            versions_by_socket[socket] = version
+            if socket.startswith("/"):
+                versions_by_socket[f"unix:{socket}"] = version
+    for site in read_sites(NGINX_SERVERS_DIR, versions_by_socket):
+        table.add_row(site.domain, collapse_home(site.root or "—"), site.php_version or "—")
 
     console.print(table)
 

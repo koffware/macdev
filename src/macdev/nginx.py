@@ -7,6 +7,15 @@ import click
 from .utils import brew_service_action, console, err_console, run
 
 
+def validate_and_reload() -> None:
+    """Quiet operation for callers that need structured errors, not process exits."""
+    for command in (["nginx", "-t"], ["brew", "services", "reload", "nginx"]):
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        if result.returncode:
+            detail = result.stderr.strip() or result.stdout.strip()
+            raise RuntimeError(f"{' '.join(command)} failed: {detail}")
+
+
 def reload_nginx() -> None:
     """Test config and reload nginx. Exits on failure."""
     result = subprocess.run(["nginx", "-t"], capture_output=True, text=True)

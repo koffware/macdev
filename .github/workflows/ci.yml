@@ -30,3 +30,21 @@ jobs:
 
       - name: Run tests
         run: pytest --cov=macdev --cov-report=term-missing
+
+  desktop:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: pip install -e .
+
+      - name: Test native bridge and build app
+        run: |
+          swift test --package-path macos
+          python scripts/build_macos_app.py
