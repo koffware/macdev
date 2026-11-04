@@ -6,21 +6,12 @@ struct PHPView: View {
     @State private var tab = "settings"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Text("PHP").font(.largeTitle.weight(.semibold))
-                Spacer()
-                Picker("Version", selection: $store.phpVersion) {
-                    ForEach(store.phpVersions, id: \.self) { Text("PHP \($0)").tag($0) }
-                }.frame(width: 190).disabled(store.isBusy)
-                Button { Task { await store.loadPHP() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                    .disabled(store.isBusy || store.isLoadingPHP)
-            }
+        VStack(alignment: .leading, spacing: 22) {
             Picker("PHP management", selection: $tab) {
                 Text("Configuration").tag("settings")
                 Text("Extensions").tag("extensions")
-            }.pickerStyle(.segmented)
-            if store.isLoadingPHP { ProgressView("Reading PHP \(store.phpVersion)…") }
+            }.pickerStyle(.segmented).labelsHidden().fixedSize()
+            if store.isLoadingPHP && store.phpDetails == nil { ProgressView("Reading PHP \(store.phpVersion)…") }
             if let error = store.phpError {
                 ScrollView { Text(error).foregroundStyle(.red).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
             }
@@ -32,7 +23,9 @@ struct PHPView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(26)
+        .padding(20)
+        .frame(maxWidth: 1000, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: store.phpVersion) { await store.loadPHP() }
     }
 }
@@ -51,26 +44,43 @@ private struct PHPSettingsEditor: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Defaults for sites using PHP \(details.version)").font(.headline)
-                Form {
+                WorkspacePanel {
                     ForEach(fields, id: \.0) { key, title, example in
-                        TextField(title, text: Binding(get: { values[key] ?? "" }, set: { values[key] = $0 }), prompt: Text(example))
+                        HStack {
+                            Text(title)
+                            Spacer(minLength: 20)
+                            TextField(title, text: Binding(get: { values[key] ?? "" }, set: { values[key] = $0 }), prompt: Text(example))
+                                .labelsHidden().textFieldStyle(.roundedBorder).frame(width: 160)
+                                .multilineTextAlignment(.trailing)
+                        }.padding(.horizontal, 16).padding(.vertical, 11)
+                        Divider().padding(.horizontal, 16)
                     }
                     Toggle("Display PHP errors", isOn: Binding(
                         get: { ["on", "1"].contains((values["display_errors"] ?? "").lowercased()) },
                         set: { values["display_errors"] = $0 ? "On" : "Off" }
                     ))
-                }.textFieldStyle(.roundedBorder)
-                Text("Memory and size fields accept values such as 128M or 1G. A memory limit of -1 and an execution timeout of 0 mean unlimited. Saving validates PHP and restarts this version’s service if it is running.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("Save Configuration") { Task { _ = await store.savePHP(details, values: values) } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(store.isBusy || values == details.settings || values.isEmpty)
-                Divider()
-                Text("FPM configuration").font(.headline)
-                Text(details.iniPath).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                Button("Show Configuration in Finder") { store.revealFile(details.iniPath) }
-                Text("Changes are stored in a separate MacDev INI file. These are FPM defaults; individual pool or project settings may override them. The terminal may use a different php-cli.ini.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .toggleStyle(.switch).controlSize(.small).padding(16)
+                }
+                HStack(spacing: 12) {
+                    ContextHelp("Memory and size fields accept values such as 128M or 1G. A memory limit of -1 and an execution timeout of 0 mean unlimited.")
+                    Text("Saving validates PHP and restarts this version’s service if it is running.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Save Configuration") { Task { _ = await store.savePHP(details, values: values) } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(store.isBusy || store.isLoadingPHP || values == details.settings || values.isEmpty)
+                }
+                DisclosureGroup("Configuration files") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            PathText(value: details.iniPath)
+                            Spacer()
+                            Button("Show in Finder") { store.revealFile(details.iniPath) }
+                        }
+                        Text("Changes are stored in a separate MacDev INI file. These are FPM defaults; individual pool or project settings may override them. The terminal may use a different php-cli.ini.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.padding(.top, 12)
+                }
                 if let diagnostics = details.diagnostics {
                     Text(diagnostics).font(.caption).foregroundStyle(.orange).textSelection(.enabled)
                 }
@@ -126,8 +136,11 @@ private struct ExtensionsView: View {
                     }
                 }.padding(.vertical, 5).disabled(store.isBusy || store.isLoadingPHP)
             }.listStyle(.inset)
-            Text("New installations use a separate INI file per extension. Use Separate INI to move existing load directives out of php.ini and consolidate duplicates. Built-in modules cannot be removed; only PECL packages can be uninstalled here.")
-                .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                ContextHelp("New installations use a separate INI file per extension. Use Separate INI to move existing load directives out of php.ini and consolidate duplicates. Built-in modules cannot be removed; only PECL packages can be uninstalled here.")
+                Text("Built-in modules and extensions from other managers are kept separate from removable PECL packages.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .sheet(isPresented: $installing) { ExtensionInstaller(store: store, details: details) }
         .confirmationDialog("Remove \(removing?.package ?? removing?.name ?? "extension") from PHP \(details.version)?", isPresented: Binding(

@@ -4,9 +4,20 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var store: SiteStore
     @State private var path = ""
+    @AppStorage("appearance") private var appearance: AppAppearance = .auto
 
     var body: some View {
         Form {
+            Section("Appearance") {
+                Picker("Theme", selection: $appearance) {
+                    ForEach(AppAppearance.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("Auto follows your Mac’s appearance.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Python interpreter") {
                 Text("Use the Python installation where MacDev’s dependencies, Click and Rich, are installed.")
                     .foregroundStyle(.secondary)
@@ -22,7 +33,7 @@ struct SettingsView: View {
                     }
                     Spacer()
                     Button("Save & Reconnect") { Task { await store.saveInterpreter(path) } }
-                        .disabled(store.isBusy || !path.hasPrefix("/"))
+                        .disabled(store.isStarting || store.isBusy || store.isLoadingPHP || store.isLoadingServices || !path.hasPrefix("/"))
                 }
                 if let error = store.error {
                     Text(error).foregroundStyle(.red).textSelection(.enabled)
@@ -31,7 +42,8 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding(16)
-        .frame(width: 560, height: 310)
+        .frame(width: 560, height: 420)
+        .preferredColorScheme(appearance.colorScheme)
         .onAppear { path = store.pythonExecutable }
     }
 }

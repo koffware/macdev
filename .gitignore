@@ -8,3 +8,8 @@ build/
 .build/
 .swiftpm/
 .pytest_cache/
+
+# Local design review artifacts
+generated_images/
+output/
+design-qa.md
