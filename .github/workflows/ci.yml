@@ -6,22 +6,23 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -32,12 +33,12 @@ jobs:
         run: pytest --cov=macdev --cov-report=term-missing
 
   python-lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -51,38 +52,3 @@ jobs:
 
       - name: mypy
         run: mypy
-
-  desktop:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install backend dependencies
-        run: pip install -e .
-
-      - name: Install SwiftLint
-        run: brew install swiftlint
-
-      - name: swift-format
-        run: swift format lint --strict --recursive --parallel macos/Package.swift macos/Sources macos/Tests
-
-      - name: SwiftLint
-        run: swiftlint lint --strict --reporter github-actions-logging
-
-      - name: Swift build (warnings as errors)
-        run: swift build --package-path macos --build-tests -Xswiftc -warnings-as-errors
-
-      - name: SwiftLint analyzer
-        run: |
-          swift build --package-path macos --build-tests --scratch-path macos/.build/analyze -v > swift-build.log 2>&1
-          swiftlint analyze --strict --compiler-log-path swift-build.log --reporter github-actions-logging
-
-      - name: Test native bridge and build app
-        run: |
-          swift test --package-path macos
-          python scripts/build_macos_app.py

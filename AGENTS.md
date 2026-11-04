@@ -23,6 +23,9 @@ scripts/lint.sh --fix    # apply swift-format, SwiftLint, and Ruff fixes first
 - **Python**: Ruff (lint + format, `[tool.ruff]` in `pyproject.toml`) and mypy (`[tool.mypy]`).
 - Fix findings rather than suppressing them. When a suppression is unavoidable, scope it to one
   line (`# noqa: RULE` / `// swiftlint:disable:next rule`) and state the reason beside it.
+- CI: `ci.yml` runs Python tests and lint on Linux for every push. The macOS `desktop.yml`
+  workflow runs only when `macos/`, the app build script, or Swift lint configs change (or when
+  triggered manually), so run `scripts/lint.sh` locally before pushing.
 
 ## Commands
 

@@ -1,0 +1,64 @@
+name: Desktop
+
+# macOS runners are scarce and slow to schedule, so this workflow runs only when
+# the native app or its build inputs change. `scripts/lint.sh` runs the same
+# checks locally; use "Run workflow" in the Actions tab to trigger it manually.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "macos/**"
+      - "scripts/build_macos_app.py"
+      - ".swift-format"
+      - ".swiftlint.yml"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "macos/**"
+      - "scripts/build_macos_app.py"
+      - ".swift-format"
+      - ".swiftlint.yml"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: pip install -e .
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: swift-format
+        run: swift format lint --strict --recursive --parallel macos/Package.swift macos/Sources macos/Tests
+
+      - name: SwiftLint
+        run: swiftlint lint --strict --reporter github-actions-logging
+
+      - name: Swift build (warnings as errors)
+        run: swift build --package-path macos --build-tests -Xswiftc -warnings-as-errors
+
+      - name: SwiftLint analyzer
+        run: |
+          swift build --package-path macos --build-tests --scratch-path macos/.build/analyze -v > swift-build.log 2>&1
+          swiftlint analyze --strict --compiler-log-path swift-build.log --reporter github-actions-logging
+
+      - name: Test native bridge and build app
+        run: |
+          swift test --package-path macos
+          python scripts/build_macos_app.py
