@@ -5,10 +5,24 @@ This file provides guidance to coding agents working in this repository.
 ## Setup & Installation
 
 ```bash
-pip install -e .
+pip install -e ".[dev]"
+brew install swiftlint   # swift-format ships with the Xcode toolchain
 ```
 
 Requires Homebrew with `nginx`, at least one `php@X.Y` formula, and `mkcert` installed.
+
+## Linting & static analysis
+
+```bash
+scripts/lint.sh          # every check CI runs; exits non-zero on any finding
+scripts/lint.sh --fix    # apply swift-format, SwiftLint, and Ruff fixes first
+```
+
+- **Swift**: `swift format` (layout, `.swift-format`), SwiftLint (`.swiftlint.yml`, lint plus
+  `analyze` for unused imports/declarations), and a Swift 6 language-mode build with warnings as errors.
+- **Python**: Ruff (lint + format, `[tool.ruff]` in `pyproject.toml`) and mypy (`[tool.mypy]`).
+- Fix findings rather than suppressing them. When a suppression is unavoidable, scope it to one
+  line (`# noqa: RULE` / `// swiftlint:disable:next rule`) and state the reason beside it.
 
 ## Commands
 

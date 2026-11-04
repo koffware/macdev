@@ -1,10 +1,12 @@
 """Atomic configuration writes with rollback and optimistic concurrency checks."""
+
 import fcntl
 import hashlib
 import os
-from pathlib import Path
 import tempfile
+from collections.abc import Mapping
 from contextlib import ExitStack
+from pathlib import Path
 
 
 def revision(content: bytes) -> str:
@@ -24,13 +26,14 @@ def atomic_write(path: Path, content: bytes, mode: int = 0o644):
             output.write(content)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(name, path)
+        Path(name).replace(path)
     finally:
-        if os.path.exists(name):
-            os.unlink(name)
+        Path(name).unlink(missing_ok=True)
 
 
-def apply_changes(changes: dict[Path, bytes | None], validate, expected=None, recover=None, precondition=None):
+def apply_changes(  # noqa: PLR0912 - lock, check, write, and rollback stay in one auditable sequence
+    changes: Mapping[Path, bytes | None], validate, expected=None, recover=None, precondition=None
+):
     """Hold directory locks through validation; restore files on any failed step."""
     with ExitStack() as stack:
         for directory in sorted({path.parent for path in changes}):
@@ -43,7 +46,9 @@ def apply_changes(changes: dict[Path, bytes | None], validate, expected=None, re
             if path.is_symlink():
                 raise ValueError(f"Linked configuration must be edited at its source: {path}")
             originals[path] = path.read_bytes() if path.exists() else None
-            modes[path] = path.stat().st_mode & 0o777 if path.exists() else (0o600 if path.suffix == ".backup" else 0o644)
+            modes[path] = (
+                path.stat().st_mode & 0o777 if path.exists() else (0o600 if path.suffix == ".backup" else 0o644)
+            )
         for path, wanted in (expected or {}).items():
             actual = originals[path]
             if (revision(actual) if actual is not None else None) != wanted:
@@ -63,16 +68,17 @@ def apply_changes(changes: dict[Path, bytes | None], validate, expected=None, re
             failures = []
             for path in reversed(written):
                 try:
-                    if originals[path] is None:
+                    original = originals[path]
+                    if original is None:
                         path.unlink(missing_ok=True)
                     else:
-                        atomic_write(path, originals[path], mode=modes[path])
+                        atomic_write(path, original, mode=modes[path])
                 except OSError as restore_error:
                     failures.append(f"Could not restore {path}: {restore_error}")
             if recover and not failures:
                 try:
                     recover()
-                except Exception as recovery_error:
+                except Exception as recovery_error:  # noqa: BLE001 - must not mask the original failure
                     failures.append(f"Service recovery failed: {recovery_error}")
             suffix = "\n".join(failures) if failures else "The previous configuration was restored on disk."
             raise RuntimeError(f"{exc}\n{suffix}") from exc

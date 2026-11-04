@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
+
 @testable import MacDev
 
 final class SplashAppearanceTests: XCTestCase {
@@ -37,8 +38,9 @@ final class SplashAppearanceTests: XCTestCase {
                     .tint(accent)
                     .frame(width: size.width, height: size.height)
                 let hosting = NSHostingView(rootView: view)
-                let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
-                                      styleMask: [.borderless], backing: .buffered, defer: false)
+                let window = NSWindow(
+                    contentRect: NSRect(origin: .zero, size: size),
+                    styleMask: [.borderless], backing: .buffered, defer: false)
                 window.appearance = NSAppearance(named: appearance)
                 window.contentView = hosting
                 hosting.setFrameSize(size)
@@ -46,7 +48,8 @@ final class SplashAppearanceTests: XCTestCase {
                 let bitmap = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
                 hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
                 let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-                try png.write(to: directory.appendingPathComponent("\(name)-\(Int(size.width))x\(Int(size.height)).png"))
+                try png.write(
+                    to: directory.appendingPathComponent("\(name)-\(Int(size.width))x\(Int(size.height)).png"))
             }
         }
     }

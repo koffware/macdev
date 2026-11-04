@@ -3,8 +3,9 @@ import MacDevCore
 import SwiftUI
 
 private enum WorkspaceSection: String, CaseIterable {
-    case sites = "Sites", php = "PHP", services = "Services"
-
+    case sites = "Sites"
+    case php = "PHP"
+    case services = "Services"
 }
 
 struct SitesView: View {
@@ -28,16 +29,18 @@ struct SitesView: View {
     }
 
     private var workspaceSelection: Binding<WorkspaceSection> {
-        Binding(get: { section }, set: { destination in
-            guard destination != section else { return }
-            if section == .sites { lastSiteID = store.selection }
-            switch destination {
-            case .sites:
-                store.selection = store.sites.first { $0.id == lastSiteID }?.id ?? store.sites.first?.id
-            case .php: store.selection = "section:php"
-            case .services: store.selection = "section:services"
-            }
-        })
+        Binding(
+            get: { section },
+            set: { destination in
+                guard destination != section else { return }
+                if section == .sites { lastSiteID = store.selection }
+                switch destination {
+                case .sites:
+                    store.selection = store.sites.first { $0.id == lastSiteID }?.id ?? store.sites.first?.id
+                case .php: store.selection = "section:php"
+                case .services: store.selection = "section:services"
+                }
+            })
     }
 
     var body: some View {
@@ -60,10 +63,15 @@ struct SitesView: View {
                 if let message = store.error ?? store.warning {
                     Divider()
                     VStack(alignment: .leading, spacing: 6) {
-                        Label(store.error == nil ? "Completed with a warning" : "MacDev needs your attention", systemImage: "exclamationmark.triangle.fill")
-                            .fontWeight(.medium)
-                        ScrollView { Text(message).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                            .frame(maxHeight: 90)
+                        Label(
+                            store.error == nil ? "Completed with a warning" : "MacDev needs your attention",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .fontWeight(.medium)
+                        ScrollView {
+                            Text(message).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 90)
                     }
                     .font(.callout).padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -102,12 +110,18 @@ struct SitesView: View {
                 }
                 if section == .sites {
                     ToolbarItem(placement: .navigation) {
-                        Button { addingSite = true } label: { Label("Add Site", systemImage: "plus") }
-                            .disabled(!canAddSite).help("Add Site (⌘N)")
+                        Button {
+                            addingSite = true
+                        } label: {
+                            Label("Add Site", systemImage: "plus")
+                        }
+                        .disabled(!canAddSite).help("Add Site (⌘N)")
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button { Task { await store.refreshCurrentSection() } } label: {
+                    Button {
+                        Task { await store.refreshCurrentSection() }
+                    } label: {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
                     .disabled(store.isBusy || store.isLoadingPHP || store.isLoadingServices)
@@ -134,8 +148,10 @@ struct SitesView: View {
                         Label {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(site.domain).lineLimit(1).truncationMode(.middle)
-                                Text(site.phpVersion.map { "PHP \($0)" } ?? (site.fpm == nil ? "Static" : "PHP unknown"))
-                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(
+                                    site.phpVersion.map { "PHP \($0)" } ?? (site.fpm == nil ? "Static" : "PHP unknown")
+                                )
+                                .font(.caption).foregroundStyle(.secondary)
                             }
                         } icon: {
                             Image(systemName: site.certificate == nil ? "globe" : "lock")
@@ -151,10 +167,12 @@ struct SitesView: View {
             .listStyle(.sidebar)
             .searchable(text: $store.search, placement: .sidebar, prompt: "Search sites")
         case .php:
-            List(selection: Binding<String?>(
-                get: { store.phpVersion.isEmpty ? nil : store.phpVersion },
-                set: { if let version = $0 { store.phpVersion = version } }
-            )) {
+            List(
+                selection: Binding<String?>(
+                    get: { store.phpVersion.isEmpty ? nil : store.phpVersion },
+                    set: { if let version = $0 { store.phpVersion = version } }
+                )
+            ) {
                 Section("PHP Versions") {
                     ForEach(store.phpVersions, id: \.self) { version in
                         Label("PHP \(version)", systemImage: "chevron.left.forwardslash.chevron.right")
@@ -171,9 +189,11 @@ struct SitesView: View {
             List(selection: $serviceSelection) {
                 Section("Services") {
                     Label("All Services", systemImage: "server.rack").tag("all")
-                    ForEach(store.services.filter {
-                        serviceSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(serviceSearch)
-                    }) { service in
+                    ForEach(
+                        store.services.filter {
+                            serviceSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(serviceSearch)
+                        }
+                    ) { service in
                         Label {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(service.name)
@@ -198,8 +218,13 @@ struct SitesView: View {
             ContentUnavailableView {
                 Label(store.isBusy ? "Loading your sites" : "Connect to MacDev", systemImage: "server.rack")
             } description: {
-                Text(store.isBusy ? "Reading your Homebrew and nginx configuration." : "Check the Python interpreter in Settings, then refresh.")
-            } actions: { SettingsLink { Text("Open Settings") } }
+                Text(
+                    store.isBusy
+                        ? "Reading your Homebrew and nginx configuration."
+                        : "Check the Python interpreter in Settings, then refresh.")
+            } actions: {
+                SettingsLink { Text("Open Settings") }
+            }
         } else if store.sites.isEmpty {
             ContentUnavailableView {
                 Label("No sites yet", systemImage: "globe")
@@ -209,7 +234,8 @@ struct SitesView: View {
                 Button("Add Site") { addingSite = true }.disabled(store.isBusy || store.phpVersions.isEmpty)
             }
         } else {
-            ContentUnavailableView("Select a site", systemImage: "sidebar.left", description: Text("Choose a site to see its details."))
+            ContentUnavailableView(
+                "Select a site", systemImage: "sidebar.left", description: Text("Choose a site to see its details."))
         }
     }
 }
@@ -220,14 +246,23 @@ private struct SiteDetailView: View {
     @State private var chosenVersion = ""
     @State private var editingSite: Site?
     @State private var confirmingRemoval = false
+    // Used only through its `$` binding, which the analyzer does not index.
+    // swiftlint:disable:next unused_declaration
     @State private var showingConfiguration = true
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .center, spacing: 18) { heading; Spacer(minLength: 12); actions }
-                    VStack(alignment: .leading, spacing: 16) { heading; actions }
+                    HStack(alignment: .center, spacing: 18) {
+                        heading
+                        Spacer(minLength: 12)
+                        actions
+                    }
+                    VStack(alignment: .leading, spacing: 16) {
+                        heading
+                        actions
+                    }
                 }
                 Divider()
                 VStack(alignment: .leading, spacing: 10) {
@@ -241,8 +276,12 @@ private struct SiteDetailView: View {
                             }
                             Spacer(minLength: 0)
                             if let root = site.root {
-                                Button { store.openFolder(root) } label: { Label("Open in Finder", systemImage: "folder") }
-                                    .help("Open project folder in Finder")
+                                Button {
+                                    store.openFolder(root)
+                                } label: {
+                                    Label("Open in Finder", systemImage: "folder")
+                                }
+                                .help("Open project folder in Finder")
                             }
                         }.padding(16)
                     }
@@ -262,10 +301,14 @@ private struct SiteDetailView: View {
                                     .buttonStyle(.borderedProminent)
                                     .disabled(chosenVersion.isEmpty || chosenVersion == site.phpVersion || store.isBusy)
                             } else {
-                                Text(site.phpVersion.map { "PHP \($0)" } ?? (site.fpm == nil ? "Not configured" : "Unknown"))
+                                Text(
+                                    site.phpVersion.map { "PHP \($0)" }
+                                        ?? (site.fpm == nil ? "Not configured" : "Unknown"))
                             }
                             Spacer(minLength: 0)
-                            ContextHelp("Changes this site’s FPM address and reloads nginx after a configuration check. The selected PHP service must already be running.")
+                            ContextHelp(
+                                "Changes this site’s FPM address and reloads nginx after a configuration check. The selected PHP service must already be running."
+                            )
                         }.padding(16)
                         if let fpm = site.fpm {
                             Divider().padding(.horizontal, 16)
@@ -286,7 +329,9 @@ private struct SiteDetailView: View {
                             configurationRow("Certificate", certificate)
                         }
                     }.padding(.top, 10)
-                } label: { Text("Configuration").font(.headline) }
+                } label: {
+                    Text("Configuration").font(.headline)
+                }
             }
             .padding(20)
             .frame(maxWidth: 1060, alignment: .leading)
@@ -301,7 +346,9 @@ private struct SiteDetailView: View {
         .confirmationDialog("Remove \(site.domain)?", isPresented: $confirmingRemoval, titleVisibility: .visible) {
             Button("Remove Site", role: .destructive) { Task { await store.deleteSite(site) } }
         } message: {
-            Text("The nginx configuration will be backed up, then removed. Project files and certificates are kept. nginx will reload.")
+            Text(
+                "The nginx configuration will be backed up, then removed. Project files and certificates are kept. nginx will reload."
+            )
         }
     }
 
@@ -309,24 +356,36 @@ private struct SiteDetailView: View {
         VStack(alignment: .leading, spacing: 7) {
             Text(site.domain).font(.title2.weight(.semibold)).textSelection(.enabled)
                 .lineLimit(1).truncationMode(.middle).help(site.domain)
-            Label(site.certificate == nil ? "HTTP site" : "SSL configured",
-                  systemImage: site.certificate == nil ? "globe" : "lock.fill")
-                .font(.callout).foregroundStyle(.secondary)
+            Label(
+                site.certificate == nil ? "HTTP site" : "SSL configured",
+                systemImage: site.certificate == nil ? "globe" : "lock.fill"
+            )
+            .font(.callout).foregroundStyle(.secondary)
         }
     }
 
     private var actions: some View {
         HStack(spacing: 8) {
-            Button { store.openSite(site) } label: { Label("Open Site", systemImage: "arrow.up.right.square") }
-                .buttonStyle(.borderedProminent).disabled(site.url == nil)
-            Button { editingSite = site } label: { Label("Edit Site", systemImage: "pencil") }
-                .disabled(store.isBusy || site.canEdit != true)
+            Button {
+                store.openSite(site)
+            } label: {
+                Label("Open Site", systemImage: "arrow.up.right.square")
+            }
+            .buttonStyle(.borderedProminent).disabled(site.url == nil)
+            Button {
+                editingSite = site
+            } label: {
+                Label("Edit Site", systemImage: "pencil")
+            }
+            .disabled(store.isBusy || site.canEdit != true)
             Menu {
                 Button("Remove Site…", role: .destructive) { confirmingRemoval = true }
                     .disabled(store.isBusy || site.canDelete != true)
-            } label: { Image(systemName: "ellipsis") }
-                .menuStyle(.borderlessButton).fixedSize().frame(width: 28)
-                .accessibilityLabel("More site actions")
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton).fixedSize().frame(width: 28)
+            .accessibilityLabel("More site actions")
         }.fixedSize()
     }
 
@@ -338,10 +397,16 @@ private struct SiteDetailView: View {
             Button {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(value, forType: .string)
-            } label: { Image(systemName: "doc.on.doc") }
-                .buttonStyle(.borderless).help("Copy \(title)").accessibilityLabel("Copy \(title)")
-            Button { store.revealFile(value) } label: { Image(systemName: "folder") }
-                .buttonStyle(.borderless).help("Show \(title) in Finder").accessibilityLabel("Show \(title) in Finder")
+            } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            .buttonStyle(.borderless).help("Copy \(title)").accessibilityLabel("Copy \(title)")
+            Button {
+                store.revealFile(value)
+            } label: {
+                Image(systemName: "folder")
+            }
+            .buttonStyle(.borderless).help("Show \(title) in Finder").accessibilityLabel("Show \(title) in Finder")
         }.padding(16)
     }
 }

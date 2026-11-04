@@ -1,4 +1,5 @@
 """SSL certificate management via mkcert."""
+
 import shutil
 import subprocess
 import sys
@@ -12,10 +13,7 @@ from .utils import console, err_console, run
 
 def _require_mkcert():
     if not shutil.which("mkcert"):
-        err_console.print(
-            "[red]mkcert is not installed.[/red] "
-            "Run: [bold]brew install mkcert[/bold]"
-        )
+        err_console.print("[red]mkcert is not installed.[/red] Run: [bold]brew install mkcert[/bold]")
         sys.exit(1)
 
 
@@ -46,8 +44,12 @@ def ssl():
 
 @ssl.command("create")
 @click.argument("domains", nargs=-1, required=True)
-@click.option("--out-dir", default=None, type=click.Path(),
-              help=f"Directory to write cert files into. Default: {DEFAULT_CERT_DIR}")
+@click.option(
+    "--out-dir",
+    default=None,
+    type=click.Path(),
+    help=f"Directory to write cert files into. Default: {DEFAULT_CERT_DIR}",
+)
 def ssl_create(domains: tuple[str, ...], out_dir: str | None):
     """Generate trusted local SSL certificates for DOMAINS.
 
@@ -70,14 +72,16 @@ def ssl_info(cert_path: str):
     """Show details of a certificate file."""
     result = subprocess.run(
         ["openssl", "x509", "-in", cert_path, "-noout", "-text"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if result.returncode != 0:
         err_console.print(f"[red]openssl error:[/red] {result.stderr.strip()}")
         sys.exit(1)
 
     # Print only the most useful lines
-    for line in result.stdout.splitlines():
-        line = line.strip()
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
         if any(k in line for k in ("Subject:", "Issuer:", "Not Before", "Not After", "DNS:")):
             console.print(line)

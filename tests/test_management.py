@@ -1,16 +1,17 @@
 """Management operations against real temporary configs, never live services."""
+
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from unittest import mock
 
 import pytest
 from click.testing import CliRunner
 
-from macdev.api import api
-import macdev.site_manager as sites
 import macdev.php_configuration as php
-import macdev.services as services
+import macdev.site_manager as sites
+from macdev import services
+from macdev.api import api
 from macdev.sites import read_site
 from macdev.transactions import apply_changes, revision
 
@@ -59,7 +60,9 @@ def test_create_failure_removes_new_config_and_recovers_previous_state(site_envi
     assert reload.call_count == 2
 
 
-@pytest.mark.parametrize("domain", ["../app", "https://app.test", "app.test;evil", "-app.test", "app..test", "app.test:443"])
+@pytest.mark.parametrize(
+    "domain", ["../app", "https://app.test", "app.test;evil", "-app.test", "app..test", "app.test:443"]
+)
 def test_invalid_domain_cannot_write_config(site_environment, domain):
     servers, project, _ = site_environment
     with pytest.raises(ValueError):
@@ -175,10 +178,17 @@ def php_environment(tmp_path, monkeypatch):
         calls.append((command, options))
         stdout, stderr = "", ""
         if "-i" in command:
-            stdout = "\n".join(f"{key} => {value} => {value}" for key, value in {
-                "memory_limit": "128M", "upload_max_filesize": "2M", "post_max_size": "8M",
-                "max_execution_time": "30", "max_input_vars": "1000", "display_errors": "Off"
-            }.items())
+            stdout = "\n".join(
+                f"{key} => {value} => {value}"
+                for key, value in {
+                    "memory_limit": "128M",
+                    "upload_max_filesize": "2M",
+                    "post_max_size": "8M",
+                    "max_execution_time": "30",
+                    "max_input_vars": "1000",
+                    "display_errors": "Off",
+                }.items()
+            )
         elif "-r" in command:
             loaded = ["Core", "json"]
             if "-n" in command:
@@ -191,7 +201,9 @@ def php_environment(tmp_path, monkeypatch):
             module = "http" if command[-1] == "pecl_http" else command[-1]
             stdout = f"INSTALLED FILES\nTYPE INSTALL PATH\next /obsolete/Cellar/php/pecl/{module}.so\n"
         elif command[-1] == "list":
-            stdout = "PACKAGE VERSION STATE\n" + "\n".join(f"{name} {version} stable" for name, version in packages.items())
+            stdout = "PACKAGE VERSION STATE\n" + "\n".join(
+                f"{name} {version} stable" for name, version in packages.items()
+            )
         elif "install" in command:
             name = command[-1]
             packages[name] = "1.0.0"
@@ -237,7 +249,9 @@ def test_settings_overlay_preserves_unrelated_settings_and_targets_only_one_serv
     assert "date.timezone = UTC" in overlay.read_text()
     assert "memory_limit = 1G" in overlay.read_text()
     assert runtime.ini.read_text().startswith("; keep this comment")
-    assert [command for command, _ in calls if command[:2] == ["brew", "services"]] == [["brew", "services", "restart", "php@8.4"]]
+    assert [command for command, _ in calls if command[:2] == ["brew", "services"]] == [
+        ["brew", "services", "restart", "php@8.4"]
+    ]
 
 
 def test_stopped_php_is_not_started_by_saving_settings(php_environment):
@@ -275,7 +289,9 @@ def test_failed_restart_restores_and_restarts_previous_configuration(php_environ
     with pytest.raises(RuntimeError, match="restored on disk"):
         php.save_settings("8.4", details["revision"], details["settings"])
     assert not (runtime.scan / "zzzz-macdev.ini").exists()
-    assert [command for command, _ in calls if command[:2] == ["brew", "services"]] == [["brew", "services", "restart", "php@8.4"]]
+    assert [command for command, _ in calls if command[:2] == ["brew", "services"]] == [
+        ["brew", "services", "restart", "php@8.4"]
+    ]
 
 
 def test_disable_and_enable_preserve_other_settings_and_enable_only_one_entry(php_environment):
@@ -305,7 +321,7 @@ def test_install_uses_matching_php_tools_and_registry(php_environment):
 
 
 def test_remove_disables_before_uninstall_and_can_be_reinstalled(php_environment):
-    runtime, calls, _, packages = php_environment
+    runtime, _, _, packages = php_environment
     php.remove_extension("8.4", php.config_revision(runtime), "redis")
     assert "redis" not in packages
     assert not (runtime.extension_dir / "redis.so").exists()
@@ -353,8 +369,15 @@ def test_builtin_toggle_and_non_pecl_removal_are_rejected(php_environment):
         php.remove_extension("8.4", php.config_revision(runtime), "json")
 
 
-@pytest.mark.parametrize("key,value", [("memory_limit", "1G\nextension=evil"), ("max_execution_time", "-1"),
-                                       ("max_input_vars", "0"), ("display_errors", "maybe")])
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("memory_limit", "1G\nextension=evil"),
+        ("max_execution_time", "-1"),
+        ("max_input_vars", "0"),
+        ("display_errors", "maybe"),
+    ],
+)
 def test_php_values_are_validated(php_environment, key, value):
     details = php.php_details("8.4")
     with pytest.raises(ValueError):
@@ -384,7 +407,9 @@ def test_failed_nginx_validation_does_not_restart_service(monkeypatch):
 
 
 def test_new_api_actions_keep_json_error_contract(site_environment):
-    result = CliRunner().invoke(api, ["create-site", "--domain", "../invalid", "--root", str(site_environment[1]), "--version", "8.4"])
+    result = CliRunner().invoke(
+        api, ["create-site", "--domain", "../invalid", "--root", str(site_environment[1]), "--version", "8.4"]
+    )
     assert result.exit_code == 1
     assert json.loads(result.output)["ok"] is False
 
@@ -409,14 +434,23 @@ def test_install_reports_package_retained_if_enabling_fails(php_environment, mon
 
 def test_successful_fpm_test_surfaces_duplicate_module_warning(php_environment, monkeypatch):
     runtime, _, _, _ = php_environment
-    message = 'NOTICE: PHP message: PHP Warning: Module "amqp" is already loaded in Unknown on line 0\nNOTICE: configuration test is successful\n'
+    message = (
+        'NOTICE: PHP message: PHP Warning: Module "amqp" is already loaded in Unknown on line 0\n'
+        "NOTICE: configuration test is successful\n"
+    )
     monkeypatch.setattr(php, "run_checked", lambda *args, **kwargs: subprocess.CompletedProcess([], 0, "", message))
     assert '"amqp" is already loaded' in php.validate_fpm(runtime)
 
 
 def test_successful_exit_still_rejects_extension_load_failure(php_environment, monkeypatch):
     runtime, _, _, _ = php_environment
-    monkeypatch.setattr(php, "run_checked", lambda *args, **kwargs: subprocess.CompletedProcess([], 0, "", "PHP Warning: Unable to load dynamic library bad.so"))
+    monkeypatch.setattr(
+        php,
+        "run_checked",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            [], 0, "", "PHP Warning: Unable to load dynamic library bad.so"
+        ),
+    )
     with pytest.raises(RuntimeError, match="startup validation failed"):
         php.validate_fpm(runtime)
 
@@ -469,7 +503,9 @@ def test_separate_ini_consolidates_main_ini_and_existing_file_without_losing_set
     row = next(row for row in details["extensions"] if row["id"] == "redis")
     assert row["can_separate_ini"]
     php.separate_extension_ini("8.4", details["revision"], "redis")
-    assert runtime.ini.read_bytes() == b'; retain exactly\r\n; extension="redis.so" ; custom note\r\nmemory_limit=512M\r\n'
+    assert (
+        runtime.ini.read_bytes() == b'; retain exactly\r\n; extension="redis.so" ; custom note\r\nmemory_limit=512M\r\n'
+    )
     assert (runtime.scan / "redis.ini").read_bytes() == original_scan
     row = next(row for row in php.php_details("8.4")["extensions"] if row["id"] == "redis")
     assert row["enabled"] and not row["can_separate_ini"]
@@ -484,7 +520,10 @@ def test_separate_ini_moves_main_only_entry_preserving_its_directive(php_environ
     target = runtime.scan / "50-macdev-ext-redis.ini"
     assert f'extension="{runtime.extension_dir}/redis.so" ; retain note' in target.read_text()
     _, entries = php.configuration_values(runtime)
-    assert [(entry["path"], entry["enabled"]) for entry in entries if entry["name"] == "redis"] == [(runtime.ini, False), (target, True)]
+    assert [(entry["path"], entry["enabled"]) for entry in entries if entry["name"] == "redis"] == [
+        (runtime.ini, False),
+        (target, True),
+    ]
 
 
 def test_separate_ini_preserves_disabled_state(php_environment):
@@ -533,8 +572,20 @@ def test_separate_ini_rejects_stale_revision_and_builtin_modules(php_environment
 
 def test_separate_ini_is_idempotent_and_api_exposes_the_action(php_environment):
     runtime, calls, _, _ = php_environment
-    result = CliRunner().invoke(api, ["extension", "--version", "8.4", "--revision", php.config_revision(runtime),
-                                     "--name", "redis", "--action", "separate-ini"])
+    result = CliRunner().invoke(
+        api,
+        [
+            "extension",
+            "--version",
+            "8.4",
+            "--revision",
+            php.config_revision(runtime),
+            "--name",
+            "redis",
+            "--action",
+            "separate-ini",
+        ],
+    )
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["data"]["changed"] is False
     assert not any(command[:2] == ["brew", "services"] for command, _ in calls)

@@ -1,4 +1,5 @@
 """Desktop protocol and real config edits, with all machine operations stubbed."""
+
 import json
 import subprocess
 from unittest import mock
@@ -63,11 +64,14 @@ def test_switch_returns_only_json_and_maps_unix_socket(site):
     assert snapshot["data"]["sites"][0]["php_version"] == "8.4"
 
 
-@pytest.mark.parametrize("failure", [
-    RuntimeError("nginx configuration test failed"),
-    subprocess.TimeoutExpired(["brew", "services", "reload", "nginx"], 30),
-    FileNotFoundError("nginx not found"),
-])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        RuntimeError("nginx configuration test failed"),
+        subprocess.TimeoutExpired(["brew", "services", "reload", "nginx"], 30),
+        FileNotFoundError("nginx not found"),
+    ],
+)
 def test_failed_switch_restores_exact_original_and_reports_json(site, failure):
     original = site.read_bytes()
     with mock.patch("macdev.nginx.validate_and_reload", side_effect=failure):
@@ -117,8 +121,9 @@ def test_static_site_cannot_be_switched(site):
 
 def test_cli_per_site_uses_same_change_and_restoration(site):
     original = site.read_bytes()
-    with mock.patch("macdev.cli.check_requirements"), mock.patch(
-        "macdev.nginx.validate_and_reload", side_effect=RuntimeError("invalid nginx config")
+    with (
+        mock.patch("macdev.cli.check_requirements"),
+        mock.patch("macdev.nginx.validate_and_reload", side_effect=RuntimeError("invalid nginx config")),
     ):
         result = CliRunner().invoke(cli, ["php", "switch", "8.4", "--domain", "app.test"])
     assert result.exit_code != 0
@@ -127,7 +132,9 @@ def test_cli_per_site_uses_same_change_and_restoration(site):
 
 
 def test_read_error_returns_json(site, monkeypatch):
-    monkeypatch.setattr("macdev.api.get_installed_versions", mock.Mock(side_effect=FileNotFoundError("Homebrew is missing")))
+    monkeypatch.setattr(
+        "macdev.api.get_installed_versions", mock.Mock(side_effect=FileNotFoundError("Homebrew is missing"))
+    )
     result = CliRunner().invoke(api, ["snapshot"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error"] == "Homebrew is missing"
@@ -135,9 +142,13 @@ def test_read_error_returns_json(site, monkeypatch):
 
 def test_validation_failure_never_reloads_nginx():
     from macdev.nginx import validate_and_reload
-    with mock.patch("macdev.nginx.subprocess.run", return_value=subprocess.CompletedProcess(
-        ["nginx", "-t"], 1, stdout="", stderr="invalid directive"
-    )) as run:
-        with pytest.raises(RuntimeError, match="invalid directive"):
-            validate_and_reload()
-    run.assert_called_once_with(["nginx", "-t"], capture_output=True, text=True, timeout=30)
+
+    with (
+        mock.patch(
+            "macdev.nginx.subprocess.run",
+            return_value=subprocess.CompletedProcess(["nginx", "-t"], 1, stdout="", stderr="invalid directive"),
+        ) as run,
+        pytest.raises(RuntimeError, match="invalid directive"),
+    ):
+        validate_and_reload()
+    run.assert_called_once_with(["nginx", "-t"], capture_output=True, text=True, timeout=30, check=False)

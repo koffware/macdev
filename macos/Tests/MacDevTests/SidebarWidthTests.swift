@@ -1,24 +1,27 @@
 import AppKit
 import SwiftUI
 import XCTest
+
 @testable import MacDev
 
 final class SidebarWidthTests: XCTestCase {
     @MainActor
     func testNativeDividerCannotResizeSidebar() async throws {
         let sidebarWidth: CGFloat = 240
-        let hosting = NSHostingController(rootView:
-            NavigationSplitView(columnVisibility: .constant(.all)) {
-                List { Text("Sites") }
-                    .frame(width: sidebarWidth)
-                    .navigationSplitViewColumnWidth(min: sidebarWidth, ideal: sidebarWidth, max: sidebarWidth)
-                    .background(SidebarWidthLock(width: sidebarWidth))
-            } detail: {
-                Text("Workspace").frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+        let hosting = NSHostingController(
+            rootView:
+                NavigationSplitView(columnVisibility: .constant(.all)) {
+                    List { Text("Sites") }
+                        .frame(width: sidebarWidth)
+                        .navigationSplitViewColumnWidth(min: sidebarWidth, ideal: sidebarWidth, max: sidebarWidth)
+                        .background(SidebarWidthLock(width: sidebarWidth))
+                } detail: {
+                    Text("Workspace").frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
         )
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 800),
-                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1240, height: 800),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.contentViewController = hosting
         // Give SwiftUI's representable its native parent hierarchy. No backend
         // or real Homebrew/nginx configuration participates in this layout test.

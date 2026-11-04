@@ -1,17 +1,26 @@
 """Per-version FPM defaults and installed extensions, including PECL packages."""
-from dataclasses import dataclass
+
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import tempfile
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
 
 from .php import _php_binary, get_installed_versions
 from .services import list_services, run_checked
 from .transactions import apply_changes
 
-SETTING_KEYS = ("memory_limit", "upload_max_filesize", "post_max_size", "max_execution_time", "max_input_vars", "display_errors")
+SETTING_KEYS = (
+    "memory_limit",
+    "upload_max_filesize",
+    "post_max_size",
+    "max_execution_time",
+    "max_input_vars",
+    "display_errors",
+)
 
 
 @dataclass(frozen=True)
@@ -44,7 +53,10 @@ def runtime_paths(version: str) -> Runtime:
     php = _php_binary(version)
     if not php:
         raise ValueError(f"The PHP {version} executable could not be found.")
-    script = "echo json_encode(['ini_dir'=>PHP_CONFIG_FILE_PATH,'scan_dir'=>PHP_CONFIG_FILE_SCAN_DIR,'extension_dir'=>ini_get('extension_dir')]);"
+    script = (
+        "echo json_encode(['ini_dir'=>PHP_CONFIG_FILE_PATH,'scan_dir'=>PHP_CONFIG_FILE_SCAN_DIR,"
+        "'extension_dir'=>ini_get('extension_dir')]);"
+    )
     values = json.loads(run_checked([str(php), "-n", "-r", script], timeout=10).stdout)
     scan = values["scan_dir"]
     if not scan or ":" in scan:
@@ -98,15 +110,22 @@ def configuration_values(runtime: Runtime) -> tuple[dict, list]:
             if stripped.startswith("["):
                 scoped = bool(re.match(r"\[(PATH|HOST)\s*=", stripped, re.I))
             setting = re.match(r"^\s*([a-z_]+)\s*=\s*(.*?)\s*$", line, re.I)
-            if setting and not scoped and setting[1].lower() in SETTING_KEYS + ("extension_dir",):
+            if setting and not scoped and setting[1].lower() in (*SETTING_KEYS, "extension_dir"):
                 values[setting[1].lower()] = ini_value(setting[2])
             extension = re.match(r"^(\s*)(;\s*)?(zend_extension|extension)\s*=\s*(.*?)\s*$", line, re.I)
             if extension and not scoped:
                 value = ini_value(extension[4])
                 name = Path(value).name.removesuffix(".so").lower()
                 if re.fullmatch(r"[a-z][a-z0-9_]*", name):
-                    entries.append({"name": name, "path": path, "line": index,
-                                    "enabled": extension[2] is None, "kind": extension[3].lower()})
+                    entries.append(
+                        {
+                            "name": name,
+                            "path": path,
+                            "line": index,
+                            "enabled": extension[2] is None,
+                            "kind": extension[3].lower(),
+                        }
+                    )
     return values, entries
 
 
@@ -119,8 +138,13 @@ def pecl_command(runtime: Runtime, *arguments, ini_path=None) -> list[str]:
 
 def extension_ini(runtime: Runtime, name: str, entries: list) -> Path:
     """Keep an existing per-extension file (and its load order), or create one."""
-    candidates = [entry for entry in entries if entry["name"] == name and entry["path"].parent == runtime.scan
-                  and not any(other["path"] == entry["path"] and other["name"] != name for other in entries)]
+    candidates = [
+        entry
+        for entry in entries
+        if entry["name"] == name
+        and entry["path"].parent == runtime.scan
+        and not any(other["path"] == entry["path"] and other["name"] != name for other in entries)
+    ]
     active = next((entry for entry in candidates if entry["enabled"]), None)
     if active or candidates:
         return (active or candidates[0])["path"]
@@ -160,46 +184,76 @@ def php_details(version: str) -> dict:
     values, entries = configuration_values(runtime)
     directory = Path(values.get("extension_dir") or runtime.extension_dir)
     if not directory.is_absolute():
-        raise ValueError("Use an absolute extension_dir in this PHP version's configuration before managing extensions.")
+        raise ValueError(
+            "Use an absolute extension_dir in this PHP version's configuration before managing extensions."
+        )
     script = "echo json_encode(get_loaded_extensions());"
     builtin = json.loads(run_checked([str(runtime.php), "-n", "-r", script], timeout=10).stdout)
-    result = run_checked([str(runtime.php), "-c", str(runtime.ini), "-r", 'echo "\\nMACDEV_MODULES:";' + script], env=runtime.environment, timeout=15)
+    result = run_checked(
+        [str(runtime.php), "-c", str(runtime.ini), "-r", 'echo "\\nMACDEV_MODULES:";' + script],
+        env=runtime.environment,
+        timeout=15,
+    )
     # Startup warnings may be printed to stdout when display_errors is enabled.
     try:
         prefix, encoded = result.stdout.rsplit("MACDEV_MODULES:", 1)
         loaded = json.loads(encoded)
-    except (json.JSONDecodeError, ValueError):
-        raise ValueError(f"PHP could not load its FPM configuration cleanly:\n{result.stderr or result.stdout}")
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(
+            f"PHP could not load its FPM configuration cleanly:\n{result.stderr or result.stdout}"
+        ) from exc
     builtin_names = {normalized_module(name) for name in builtin}
     loaded_names = {normalized_module(name) for name in loaded}
     packages = pecl_packages(runtime)
     modules_by_package = {package: package_modules(runtime, package) for package in packages}
     package_for_module = {module: package for package, modules in modules_by_package.items() for module in modules}
     binaries = {path.stem.lower() for path in directory.glob("*.so")}
-    names = builtin_names | loaded_names | binaries | {entry["name"] for entry in entries if entry["enabled"]} | package_for_module.keys()
+    names = (
+        builtin_names
+        | loaded_names
+        | binaries
+        | {entry["name"] for entry in entries if entry["enabled"]}
+        | package_for_module.keys()
+    )
     extensions = []
     for name in sorted(names):
         sources = [entry for entry in entries if entry["name"] == name]
         package = package_for_module.get(name)
         target = extension_ini(runtime, name, entries)
         active_sources = [entry for entry in sources if entry["enabled"]]
-        extensions.append({
-            "id": name, "name": name, "enabled": name in builtin_names or any(entry["enabled"] for entry in sources),
-            "loaded": name in loaded_names,
-            "builtin": name in builtin_names, "version": packages.get(package), "package": package,
-            "can_toggle": name not in builtin_names and (bool(sources) or name in binaries),
-            "can_remove": package is not None and name not in builtin_names,
-            "sources": sorted({str(entry["path"]) for entry in sources}),
-            "ini_path": str(target) if any(entry["path"] == target for entry in sources) else None,
-            "can_separate_ini": name not in builtin_names and bool(sources) and (
-                any(entry["path"] != target for entry in active_sources) or len(active_sources) > 1
-                or not any(entry["path"] == target for entry in sources)),
-        })
-    return {"version": version, "ini_path": str(runtime.ini), "scan_directory": str(runtime.scan),
-            "settings": {key: values[key] for key in SETTING_KEYS}, "extensions": extensions,
-            "revision": config_revision(runtime), "service": runtime.service,
-            "installer_available": (runtime.php.parent / "pecl").is_file(),
-            "diagnostics": (result.stderr + prefix).strip() or None}
+        extensions.append(
+            {
+                "id": name,
+                "name": name,
+                "enabled": name in builtin_names or any(entry["enabled"] for entry in sources),
+                "loaded": name in loaded_names,
+                "builtin": name in builtin_names,
+                "version": packages.get(package) if package else None,
+                "package": package,
+                "can_toggle": name not in builtin_names and (bool(sources) or name in binaries),
+                "can_remove": package is not None and name not in builtin_names,
+                "sources": sorted({str(entry["path"]) for entry in sources}),
+                "ini_path": str(target) if any(entry["path"] == target for entry in sources) else None,
+                "can_separate_ini": name not in builtin_names
+                and bool(sources)
+                and (
+                    any(entry["path"] != target for entry in active_sources)
+                    or len(active_sources) > 1
+                    or not any(entry["path"] == target for entry in sources)
+                ),
+            }
+        )
+    return {
+        "version": version,
+        "ini_path": str(runtime.ini),
+        "scan_directory": str(runtime.scan),
+        "settings": {key: values[key] for key in SETTING_KEYS},
+        "extensions": extensions,
+        "revision": config_revision(runtime),
+        "service": runtime.service,
+        "installer_available": (runtime.php.parent / "pecl").is_file(),
+        "diagnostics": (result.stderr + prefix).strip() or None,
+    }
 
 
 def validate_fpm(runtime: Runtime):
@@ -213,7 +267,7 @@ def validate_fpm(runtime: Runtime):
     return "\n".join(duplicates) or None
 
 
-def apply_php_changes(runtime: Runtime, changes: dict[Path, bytes | None], expected=None):
+def apply_php_changes(runtime: Runtime, changes: Mapping[Path, bytes | None], expected=None):
     running = any(row["name"] == runtime.service and row["status"] == "started" for row in list_services())
     restart_attempted = False
     warning = None
@@ -232,8 +286,12 @@ def apply_php_changes(runtime: Runtime, changes: dict[Path, bytes | None], expec
         if restart_attempted:
             run_checked(["brew", "services", "restart", runtime.service])
 
-    apply_changes(changes, validate, recover=recover,
-                  precondition=(lambda: require_revision(runtime, expected)) if expected else None)
+    apply_changes(
+        changes,
+        validate,
+        recover=recover,
+        precondition=(lambda: require_revision(runtime, expected)) if expected else None,
+    )
     return warning
 
 
@@ -250,9 +308,11 @@ def validate_settings(values: dict) -> dict:
     if values["display_errors"].lower() not in {"on", "off", "1", "0"}:
         raise ValueError("display_errors must be On or Off.")
     values["display_errors"] = "On" if values["display_errors"].lower() in {"on", "1"} else "Off"
+
     def size(value):
         suffix = value[-1].upper()
         return int(value[:-1]) * (1024 ** ("KMG".index(suffix) + 1)) if suffix in "KMG" else int(value)
+
     post, upload = size(values["post_max_size"]), size(values["upload_max_filesize"])
     if post and post < upload:
         raise ValueError("Maximum POST size must be at least as large as the maximum upload size, or 0 for unlimited.")
@@ -266,11 +326,20 @@ def save_settings(version: str, expected: str, values: dict) -> dict:
     path = runtime.scan / "zzzz-macdev.ini"
     if any(other.name > path.name for other in runtime.scan.glob("*.ini")):
         raise ValueError("A later INI file could override these settings. Rename or consolidate that file first.")
-    content = path.read_bytes().decode() if path.is_file() else "; PHP defaults managed by MacDev. FPM pool overrides may still apply.\n"
+    content = (
+        path.read_bytes().decode()
+        if path.is_file()
+        else "; PHP defaults managed by MacDev. FPM pool overrides may still apply.\n"
+    )
     if re.search(r"^\s*\[(?:PATH|HOST)\s*=", content, re.I | re.MULTILINE):
-        raise ValueError("The MacDev INI file contains scoped settings. Move those settings to a separate INI file first.")
-    content = "".join(line for line in content.splitlines(keepends=True)
-                      if not re.match(r"^\s*(?:" + "|".join(SETTING_KEYS) + r")\s*=", line, re.I))
+        raise ValueError(
+            "The MacDev INI file contains scoped settings. Move those settings to a separate INI file first."
+        )
+    content = "".join(
+        line
+        for line in content.splitlines(keepends=True)
+        if not re.match(r"^\s*(?:" + "|".join(SETTING_KEYS) + r")\s*=", line, re.I)
+    )
     content = content.rstrip() + "\n"
     content += "\n".join(f"{key} = {values[key]}" for key in SETTING_KEYS) + "\n"
     warning = apply_php_changes(runtime, {path: content.encode()}, expected=expected)
@@ -287,10 +356,14 @@ def extension_changes(runtime: Runtime, name: str, enabled: bool, base=None, dec
     matching = [entry for entry in entries if entry["name"] == name]
     target = extension_ini(runtime, name, entries)
     if any(entry["path"] == target and entry["name"] != name for entry in entries):
-        raise ValueError(f"The reserved INI file {target} contains another extension. Move that declaration to its own file first.")
+        raise ValueError(
+            f"The reserved INI file {target} contains another extension. Move that declaration to its own file first."
+        )
     changes = dict(base or {})
     target_entries = [entry for entry in matching if entry["path"] == target]
-    active = next((entry for entry in target_entries if entry["enabled"]), target_entries[0] if target_entries else None)
+    active = next(
+        (entry for entry in target_entries if entry["enabled"]), target_entries[0] if target_entries else None
+    )
     for path in {entry["path"] for entry in matching}:
         original = changes.get(path, path.read_bytes())
         lines = original.decode().splitlines(keepends=True)
@@ -319,7 +392,9 @@ def extension_changes(runtime: Runtime, name: str, enabled: bool, base=None, dec
         declaration = declaration or f'{kind} = "{library}"'
         existing = changes.get(target, target.read_bytes() if target.exists() else b"; Managed by MacDev\n")
         if re.search(rb"^\s*\[(?:PATH|HOST)\s*=", existing, re.I | re.MULTILINE):
-            raise ValueError("The extension's INI file contains scoped settings. Move those settings to another file first.")
+            raise ValueError(
+                "The extension's INI file contains scoped settings. Move those settings to another file first."
+            )
         separator = b"" if not existing or existing.endswith(b"\n") else b"\n"
         changes[target] = existing + separator + (declaration if enabled else "; " + declaration).encode() + b"\n"
     return changes
@@ -376,12 +451,15 @@ def install_extension(version: str, expected: str, name: str) -> dict:
                 if match:
                     module = Path(ini_value(match[1])).name.removesuffix(".so").lower()
                     declarations[module] = line.strip()
-            changes = {}
+            changes: dict[Path, bytes] = {}
             for module in modules:
                 changes = extension_changes(runtime, module, True, base=changes, declaration=declarations.get(module))
             warning = apply_php_changes(runtime, changes, expected=expected)
         except Exception as exc:
-            raise RuntimeError(f"The package was installed, but enabling it failed. It remains installed; refresh to inspect or remove it.\n{exc}") from exc
+            raise RuntimeError(
+                "The package was installed, but enabling it failed. "
+                f"It remains installed; refresh to inspect or remove it.\n{exc}"
+            ) from exc
     return {"changed": True, "warning": warning}
 
 
@@ -390,14 +468,20 @@ def remove_extension(version: str, expected: str, name: str) -> dict:
     require_revision(runtime, expected)
     packages = pecl_packages(runtime)
     modules_by_package = {package: package_modules(runtime, package) for package in packages}
-    package = name if name in packages else next((package for package, modules in modules_by_package.items() if name in modules), None)
+    package = (
+        name
+        if name in packages
+        else next((package for package, modules in modules_by_package.items() if name in modules), None)
+    )
     if not package or not modules_by_package[package]:
         raise ValueError("Only packages registered with this PHP version's PECL installer can be removed here.")
     modules = modules_by_package[package]
-    builtin = json.loads(run_checked([str(runtime.php), "-n", "-r", "echo json_encode(get_loaded_extensions());"], timeout=10).stdout)
+    builtin = json.loads(
+        run_checked([str(runtime.php), "-n", "-r", "echo json_encode(get_loaded_extensions());"], timeout=10).stdout
+    )
     if set(modules) & {normalized_module(module) for module in builtin}:
         raise ValueError("Built-in PHP modules cannot be removed.")
-    changes = {}
+    changes: dict[Path, bytes] = {}
     for module in modules:
         changes = extension_changes(runtime, module, False, base=changes)
     warning = apply_php_changes(runtime, changes, expected=expected) if changes else None
@@ -406,14 +490,23 @@ def remove_extension(version: str, expected: str, name: str) -> dict:
         directory = Path(values.get("extension_dir") or runtime.extension_dir)
         # Homebrew upgrades may leave obsolete Cellar paths in PECL's registry.
         # Capture the current ABI-directory libraries before invoking the uninstaller.
-        libraries = {directory / f"{module}.so": (directory / f"{module}.so").read_bytes()
-                     for module in modules if (directory / f"{module}.so").is_file()}
-        run_checked(pecl_command(runtime, "-d", f"ext_dir={directory}", "uninstall", package), env=runtime.environment, timeout=120)
+        libraries = {
+            directory / f"{module}.so": (directory / f"{module}.so").read_bytes()
+            for module in modules
+            if (directory / f"{module}.so").is_file()
+        }
+        run_checked(
+            pecl_command(runtime, "-d", f"ext_dir={directory}", "uninstall", package),
+            env=runtime.environment,
+            timeout=120,
+        )
         for library, original in libraries.items():
             if library.is_file():
                 if library.read_bytes() != original:
                     raise RuntimeError(f"{library} changed during removal and was left in place.")
                 library.unlink()
     except Exception as exc:
-        raise RuntimeError(f"The extension is disabled, but package removal failed. It has not been re-enabled.\n{exc}") from exc
+        raise RuntimeError(
+            f"The extension is disabled, but package removal failed. It has not been re-enabled.\n{exc}"
+        ) from exc
     return {"changed": True, "warning": warning}

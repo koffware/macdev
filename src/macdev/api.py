@@ -1,4 +1,5 @@
 """Versioned JSON bridge for the macOS app. No terminal formatting or prompts."""
+
 import json
 import subprocess
 
@@ -32,7 +33,7 @@ def respond(operation):
         if isinstance(exc, subprocess.CalledProcessError):
             message = exc.stderr or exc.stdout or message
         click.echo(json.dumps({"protocol_version": 1, "ok": False, "error": message}))
-        raise click.exceptions.Exit(1)
+        raise click.exceptions.Exit(1) from None
     click.echo(json.dumps({"protocol_version": 1, "ok": True, "data": data}))
 
 
@@ -63,6 +64,7 @@ def switch_php_command(site: str, version: str):
 @click.option("--key")
 def create_site_command(domain, root, version, cert, key):
     from .site_manager import create_site
+
     respond(lambda: create_site(domain, root, version, cert, key))
 
 
@@ -76,6 +78,7 @@ def create_site_command(domain, root, version, cert, key):
 @click.option("--key")
 def update_site_command(site, revision, domain, root, version, cert, key):
     from .site_manager import update_site
+
     respond(lambda: update_site(site, revision, domain, root, version, cert, key))
 
 
@@ -84,12 +87,14 @@ def update_site_command(site, revision, domain, root, version, cert, key):
 @click.option("--revision", required=True)
 def delete_site_command(site, revision):
     from .site_manager import delete_site
+
     respond(lambda: delete_site(site, revision))
 
 
 @api.command("services")
 def services_command():
     from .services import list_services
+
     respond(lambda: {"services": list_services()})
 
 
@@ -98,6 +103,7 @@ def services_command():
 @click.option("--action", required=True)
 def service_action_command(service, action):
     from .services import service_action
+
     respond(lambda: service_action(service, action))
 
 
@@ -105,6 +111,7 @@ def service_action_command(service, action):
 @click.option("--version", required=True)
 def php_details_command(version):
     from .php_configuration import php_details
+
     respond(lambda: php_details(version))
 
 
@@ -114,6 +121,7 @@ def php_details_command(version):
 @click.option("--values", required=True)
 def php_settings_command(version, revision, values):
     from .php_configuration import save_settings
+
     respond(lambda: save_settings(version, revision, json.loads(values)))
 
 

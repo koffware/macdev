@@ -42,7 +42,9 @@ struct ContextHelp: View {
     init(_ message: String) { self.message = message }
 
     var body: some View {
-        Button { isPresented.toggle() } label: {
+        Button {
+            isPresented.toggle()
+        } label: {
             Image(systemName: "info.circle").foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)

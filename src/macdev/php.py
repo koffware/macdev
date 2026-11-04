@@ -1,4 +1,5 @@
 """PHP version management — shared logic and CLI commands."""
+
 import re
 import subprocess
 import sys
@@ -12,21 +13,79 @@ from .utils import console, err_console
 
 def _reload():
     from .nginx import reload_nginx  # local import avoids circular dependency
+
     reload_nginx()
 
 
 # Modules present in a stock Homebrew PHP install across all versions.
 _DEFAULT_MODULES = {
-    "bcmath", "bz2", "calendar", "Core", "ctype", "curl", "date", "dba",
-    "dom", "exif", "FFI", "fileinfo", "filter", "ftp", "gd", "gettext",
-    "gmp", "hash", "iconv", "intl", "json", "ldap", "lexbor", "libxml",
-    "mbstring", "mysqli", "mysqlnd", "odbc", "openssl", "pcntl", "pcre",
-    "PDO", "pdo_dblib", "pdo_mysql", "PDO_ODBC", "pdo_pgsql", "pdo_sqlite",
-    "pgsql", "Phar", "posix", "pspell", "random", "readline", "Reflection",
-    "session", "shmop", "SimpleXML", "snmp", "soap", "sockets", "sodium",
-    "SPL", "sqlite3", "standard", "sysvmsg", "sysvsem", "sysvshm", "tidy",
-    "tokenizer", "uri", "xml", "xmlreader", "xmlwriter", "xsl",
-    "Zend OPcache", "zip", "zlib",
+    "bcmath",
+    "bz2",
+    "calendar",
+    "Core",
+    "ctype",
+    "curl",
+    "date",
+    "dba",
+    "dom",
+    "exif",
+    "FFI",
+    "fileinfo",
+    "filter",
+    "ftp",
+    "gd",
+    "gettext",
+    "gmp",
+    "hash",
+    "iconv",
+    "intl",
+    "json",
+    "ldap",
+    "lexbor",
+    "libxml",
+    "mbstring",
+    "mysqli",
+    "mysqlnd",
+    "odbc",
+    "openssl",
+    "pcntl",
+    "pcre",
+    "PDO",
+    "pdo_dblib",
+    "pdo_mysql",
+    "PDO_ODBC",
+    "pdo_pgsql",
+    "pdo_sqlite",
+    "pgsql",
+    "Phar",
+    "posix",
+    "pspell",
+    "random",
+    "readline",
+    "Reflection",
+    "session",
+    "shmop",
+    "SimpleXML",
+    "snmp",
+    "soap",
+    "sockets",
+    "sodium",
+    "SPL",
+    "sqlite3",
+    "standard",
+    "sysvmsg",
+    "sysvsem",
+    "sysvshm",
+    "tidy",
+    "tokenizer",
+    "uri",
+    "xml",
+    "xmlreader",
+    "xmlwriter",
+    "xsl",
+    "Zend OPcache",
+    "zip",
+    "zlib",
 }
 
 
@@ -34,11 +93,14 @@ def get_installed_versions() -> list[str]:
     """Return sorted list of PHP versions installed via Homebrew."""
     result = subprocess.run(
         ["brew", "list", "--formula"],
-        capture_output=True, text=True, check=True, timeout=30,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
     )
     versions = []
-    for line in result.stdout.splitlines():
-        line = line.strip()
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
         if line == "php":
             v = _version_from_binary(BREW / "opt/php/bin/php")
             if v:
@@ -84,26 +146,27 @@ def get_extra_modules(version: str) -> list[str]:
     binary = _php_binary(version)
     if binary is None:
         return []
-    result = subprocess.run([str(binary), "-m"], capture_output=True, text=True)
+    result = subprocess.run([str(binary), "-m"], capture_output=True, text=True, check=False)
     if result.returncode != 0:
         return []
-    all_modules = [
-        line.strip() for line in result.stdout.splitlines()
-        if line.strip() and not line.startswith("[")
-    ]
+    all_modules = [line.strip() for line in result.stdout.splitlines() if line.strip() and not line.startswith("[")]
     return [m for m in all_modules if m not in _DEFAULT_MODULES]
 
 
 # ── internal helpers ──────────────────────────────────────────────────────────
 
+
 def _version_from_binary(binary: str | Path) -> str | None:
     try:
         out = subprocess.run(
             [str(binary), "-n", "-r", "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"],
-            capture_output=True, text=True, check=True, timeout=10,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
         ).stdout.strip()
         return out or None
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return None
 
 
@@ -125,6 +188,7 @@ def _php_binary(version: str) -> Path | None:
 
 # ── CLI commands ──────────────────────────────────────────────────────────────
 
+
 @click.group()
 def php():
     """Manage PHP versions."""
@@ -140,7 +204,9 @@ def php_list():
 
     services = subprocess.run(
         ["brew", "services", "list"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
 
     console.print()
@@ -155,10 +221,10 @@ def php_list():
 
 @php.command("switch")
 @click.argument("version")
-@click.option("--domain", default=None,
-              help="Update fastcgi_pass for this vhost (default: vhost for current directory).")
-@click.option("--all", "all_vhosts", is_flag=True,
-              help="Update fastcgi_pass in all vhost configs.")
+@click.option(
+    "--domain", default=None, help="Update fastcgi_pass for this vhost (default: vhost for current directory)."
+)
+@click.option("--all", "all_vhosts", is_flag=True, help="Update fastcgi_pass in all vhost configs.")
 def php_switch(version: str, domain: str | None, all_vhosts: bool):
     """Switch the current directory's vhost to PHP VERSION (e.g. 8.2, 8.4).
 
@@ -173,10 +239,7 @@ def php_switch(version: str, domain: str | None, all_vhosts: bool):
     """
     installed = get_installed_versions()
     if version not in installed:
-        err_console.print(
-            f"[red]PHP {version} is not installed.[/red] "
-            f"Installed: {', '.join(installed) or 'none'}"
-        )
+        err_console.print(f"[red]PHP {version} is not installed.[/red] Installed: {', '.join(installed) or 'none'}")
         sys.exit(1)
 
     socket = get_fpm_socket(version)

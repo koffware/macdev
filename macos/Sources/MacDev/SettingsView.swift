@@ -33,7 +33,9 @@ struct SettingsView: View {
                     }
                     Spacer()
                     Button("Save & Reconnect") { Task { await store.saveInterpreter(path) } }
-                        .disabled(store.isStarting || store.isBusy || store.isLoadingPHP || store.isLoadingServices || !path.hasPrefix("/"))
+                        .disabled(
+                            store.isStarting || store.isBusy || store.isLoadingPHP || store.isLoadingServices
+                                || !path.hasPrefix("/"))
                 }
                 if let error = store.error {
                     Text(error).foregroundStyle(.red).textSelection(.enabled)

@@ -17,8 +17,10 @@ public struct Backend: Sendable {
         try await request(["switch-php", "--site", siteID, "--version", version])
     }
 
-    public func saveSite(site: Site?, domain: String, root: String, version: String,
-                         certificate: String, key: String) async throws -> MutationResult {
+    public func saveSite(
+        site: Site?, domain: String, root: String, version: String,
+        certificate: String, key: String
+    ) async throws -> MutationResult {
         var arguments = [site == nil ? "create-site" : "update-site", "--domain", domain, "--root", root]
         if let site {
             guard let revision = site.revision else { throw BackendError.message("Refresh sites before editing.") }
@@ -45,33 +47,42 @@ public struct Backend: Sendable {
     }
 
     public func savePHPSettings(_ details: PHPDetails, values: [String: String]) async throws -> PHPChange {
-        let json = String(decoding: try JSONEncoder().encode(values), as: UTF8.self)
-        return try await request(["php-settings", "--version", details.version,
-                                  "--revision", details.revision, "--values", json])
+        guard let json = String(bytes: try JSONEncoder().encode(values), encoding: .utf8) else {
+            throw BackendError.message("Could not encode PHP settings.")
+        }
+        return try await request([
+            "php-settings", "--version", details.version,
+            "--revision", details.revision, "--values", json,
+        ])
     }
 
     public func extensionAction(_ details: PHPDetails, name: String, action: String) async throws -> PHPChange {
-        try await request(["extension", "--version", details.version, "--revision", details.revision,
-                           "--name", name, "--action", action])
+        try await request([
+            "extension", "--version", details.version, "--revision", details.revision,
+            "--name", name, "--action", action,
+        ])
     }
 
     private func request<Value: Decodable & Sendable>(_ arguments: [String]) async throws -> Value {
         // All subprocess work and waiting happen off the UI thread.
         try await Task.detached {
             let result = try Self.run(
-                executable: self.pythonExecutable,
+                executable: pythonExecutable,
                 arguments: ["-m", "macdev.api"] + arguments,
-                sourceDirectory: self.sourceDirectory
+                sourceDirectory: sourceDirectory
             )
             do {
-                return try JSONDecoder().decode(Response<Value>.self, from: result.output).value(exitCode: result.exitCode)
+                return try JSONDecoder().decode(Response<Value>.self, from: result.output).value(
+                    exitCode: result.exitCode)
             } catch let error as BackendError {
                 throw error
             } catch {
-                let detail = String(data: result.error, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                throw BackendError.message(detail.isEmpty
-                    ? "MacDev returned an unreadable response. Check the Python interpreter in Settings."
-                    : "The backend could not start: \(detail)")
+                let detail =
+                    String(data: result.error, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                throw BackendError.message(
+                    detail.isEmpty
+                        ? "MacDev returned an unreadable response. Check the Python interpreter in Settings."
+                        : "The backend could not start: \(detail)")
             }
         }.value
     }
@@ -79,8 +90,10 @@ public struct Backend: Sendable {
     public static func environment(sourceDirectory: URL, inherited: [String: String]) -> [String: String] {
         var environment = inherited
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let paths = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin",
-                     "\(home)/.local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        let paths = [
+            "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin",
+            "\(home)/.local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+        ]
         environment["PATH"] = paths.joined(separator: ":") + ":" + (inherited["PATH"] ?? "")
         environment["PYTHONPATH"] = sourceDirectory.path
         environment["PYTHONNOUSERSITE"] = "1"
@@ -111,20 +124,25 @@ public struct Backend: Sendable {
         FileManager.default.createFile(atPath: errorURL.path, contents: nil)
         let output = try FileHandle(forWritingTo: outputURL)
         let error = try FileHandle(forWritingTo: errorURL)
-        defer { try? output.close(); try? error.close() }
+        defer {
+            try? output.close()
+            try? error.close()
+        }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.currentDirectoryURL = sourceDirectory
-        process.environment = environment(sourceDirectory: sourceDirectory, inherited: ProcessInfo.processInfo.environment)
+        process.environment = environment(
+            sourceDirectory: sourceDirectory, inherited: ProcessInfo.processInfo.environment)
         // File-backed streams cannot deadlock on a full stdout/stderr pipe.
         process.standardOutput = output
         process.standardError = error
         process.standardInput = FileHandle.nullDevice
         try process.run()
         process.waitUntilExit()
-        return Result(output: try Data(contentsOf: outputURL), error: try Data(contentsOf: errorURL),
-                      exitCode: process.terminationStatus)
+        return Result(
+            output: try Data(contentsOf: outputURL), error: try Data(contentsOf: errorURL),
+            exitCode: process.terminationStatus)
     }
 }

@@ -70,7 +70,9 @@ private struct AccentLoadingStyle: ProgressViewStyle {
                         .frame(width: geometry.size.width * 0.28)
                         .offset(x: geometry.size.width * (reduceMotion ? 0.36 : (moving ? 0.72 : 0)))
                 }
-                .animation(reduceMotion ? nil : .easeInOut(duration: 1.4).repeatForever(autoreverses: true), value: moving)
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 1.4).repeatForever(autoreverses: true), value: moving
+                )
                 .onAppear { moving = true }
         }
         .frame(height: 5)
@@ -83,7 +85,8 @@ private enum SplashArtwork {
 
     private static func load(_ name: String) -> NSImage {
         guard let url = AppResources.bundle.url(forResource: name, withExtension: "png"),
-              let image = NSImage(contentsOf: url) else {
+            let image = NSImage(contentsOf: url)
+        else {
             preconditionFailure("Missing bundled splash artwork: \(name)")
         }
         return image
@@ -95,7 +98,8 @@ enum AppResources {
         // SwiftPM's generated accessor differs between build systems. The app
         // bundle always keeps its assets in Contents/Resources for distribution.
         if let resources = Bundle.main.resourceURL,
-           let embedded = Bundle(url: resources.appendingPathComponent("MacDev_MacDev.bundle")) {
+            let embedded = Bundle(url: resources.appendingPathComponent("MacDev_MacDev.bundle"))
+        {
             return embedded
         }
         return Bundle.module

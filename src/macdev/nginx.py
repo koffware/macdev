@@ -1,4 +1,5 @@
 """Nginx service commands."""
+
 import subprocess
 import sys
 
@@ -10,7 +11,7 @@ from .utils import brew_service_action, console, err_console, run
 def validate_and_reload() -> None:
     """Quiet operation for callers that need structured errors, not process exits."""
     for command in (["nginx", "-t"], ["brew", "services", "reload", "nginx"]):
-        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
         if result.returncode:
             detail = result.stderr.strip() or result.stdout.strip()
             raise RuntimeError(f"{' '.join(command)} failed: {detail}")
@@ -18,7 +19,7 @@ def validate_and_reload() -> None:
 
 def reload_nginx() -> None:
     """Test config and reload nginx. Exits on failure."""
-    result = subprocess.run(["nginx", "-t"], capture_output=True, text=True)
+    result = subprocess.run(["nginx", "-t"], capture_output=True, text=True, check=False)
     if result.returncode != 0:
         err_console.print("[red]nginx config test failed:[/red]")
         err_console.print(result.stderr)
@@ -63,7 +64,7 @@ def nginx_start():
 @nginx.command("test")
 def nginx_test():
     """Test nginx configuration."""
-    result = subprocess.run(["nginx", "-t"], capture_output=True, text=True)
+    result = subprocess.run(["nginx", "-t"], capture_output=True, text=True, check=False)
     if result.returncode == 0:
         console.print("[green]nginx config OK.[/green]")
         console.print(result.stderr.strip())

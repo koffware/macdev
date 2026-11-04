@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "macdev"
 version = "0.1.0"
 description = "macOS local dev server management CLI (nginx + PHP via Homebrew)"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "click>=8.1",
     "rich>=13.0",
@@ -19,6 +19,8 @@ macdev = "macdev.cli:cli"
 dev = [
     "pytest>=8",
     "pytest-cov",
+    "ruff>=0.17",
+    "mypy>=2.4",
 ]
 
 [tool.setuptools.packages.find]
@@ -29,3 +31,55 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 source = ["macdev"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # flake8-bugbear
+    "UP",       # pyupgrade
+    "SIM",      # flake8-simplify
+    "C4",       # flake8-comprehensions
+    "PTH",      # prefer pathlib
+    "S",        # flake8-bandit (security)
+    "BLE",      # blind except
+    "PIE",
+    "RET",
+    "PERF",
+    "PL",       # pylint
+    "TRY",
+    "RUF",
+]
+ignore = [
+    "S603",     # subprocess without shell is the intended pattern; arguments are lists
+    "S607",     # Homebrew tools are resolved from PATH on purpose
+    "PLR0913",  # Click commands take many options
+    "PLR0917",  # Click callbacks receive options positionally
+    "PLC0415",  # local imports break import cycles and keep `macdev.api` startup lean
+    "TRY003",   # descriptive messages at the raise site are clearer here
+    "TRY300",   # return-in-try is clearer for short probes
+    "TRY301",   # raising inside a rollback-guarded try is intentional
+    "PERF203",  # try/except in loops is zero-cost on supported Pythons
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S108", "PLR2004", "PLR0915", "SIM117"]  # nested mock.patch reads better
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src", "scripts"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+strict_equality = true
+no_implicit_optional = true

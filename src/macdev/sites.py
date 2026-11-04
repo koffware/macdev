@@ -3,9 +3,11 @@
 Like the original CLI, this reads ordinary MacDev nginx configs, not a database.
 It is not a general-purpose nginx configuration parser.
 """
+
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-import re
+
 from .transactions import revision
 
 
@@ -29,7 +31,7 @@ class Site:
 
 def directive(text: str, name: str) -> str | None:
     match = re.search(rf"^\s*{re.escape(name)}\s+([^;]+);", text, re.MULTILINE)
-    return match.group(1).strip().strip('\"\'') if match else None
+    return match.group(1).strip().strip("\"'") if match else None
 
 
 def read_site(conf: Path, versions_by_socket: dict[str, str]) -> Site:
@@ -42,13 +44,15 @@ def read_site(conf: Path, versions_by_socket: dict[str, str]) -> Site:
         id=conf.stem,
         domain=names.split()[0] if names else conf.stem,
         root=directive(text, "root"),
-        php_version=versions_by_socket.get(fpm),
+        php_version=versions_by_socket.get(fpm) if fpm else None,
         fpm=fpm,
         certificate=directive(text, "ssl_certificate"),
         config_path=str(conf),
         can_switch_php=bool(fpm) and not conf.is_symlink(),
         revision=revision(content),
-        can_edit=len(set(re.findall(r"^[ \t]*root[ \t]+([^;]+);", text, re.MULTILINE))) == 1 and safe_id and not conf.is_symlink(),
+        can_edit=len(set(re.findall(r"^[ \t]*root[ \t]+([^;]+);", text, re.MULTILINE))) == 1
+        and safe_id
+        and not conf.is_symlink(),
         can_delete=safe_id and not conf.is_symlink(),
     )
 

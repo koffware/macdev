@@ -50,8 +50,8 @@ struct SidebarWidthLock: NSViewRepresentable {
             scheduled = true
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.scheduled = false
-                self.applyLock()
+                scheduled = false
+                applyLock()
             }
         }
 
@@ -70,9 +70,10 @@ struct SidebarWidthLock: NSViewRepresentable {
             var ancestor = superview
             while let view = ancestor {
                 if let split = view as? NSSplitView, split.isVertical,
-                   let pane = split.arrangedSubviews.first, isDescendant(of: pane),
-                   let controller = split.delegate as? NSSplitViewController,
-                   let item = controller.splitViewItems.first {
+                    let pane = split.arrangedSubviews.first, isDescendant(of: pane),
+                    let controller = split.delegate as? NSSplitViewController,
+                    let item = controller.splitViewItems.first
+                {
                     if item.minimumThickness != width { item.minimumThickness = width }
                     if item.maximumThickness != width { item.maximumThickness = width }
                     if item.canCollapse { item.canCollapse = false }

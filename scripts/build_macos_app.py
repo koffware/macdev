@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Build a local app bundle using a Python interpreter with Click and Rich."""
+
 import argparse
 import json
 import os
-from pathlib import Path
 import plistlib
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 
 def build_icon(source: Path, destination: Path):
@@ -17,16 +18,27 @@ def build_icon(source: Path, destination: Path):
     with tempfile.TemporaryDirectory(prefix="macdev-icon-") as temporary:
         chunks = []
         representations = {
-            "icp4": 16, "icp5": 32, "icp6": 64,
-            "ic07": 128, "ic08": 256, "ic09": 512, "ic10": 1024,
-            "ic11": 32, "ic12": 64, "ic13": 256, "ic14": 512,
+            "icp4": 16,
+            "icp5": 32,
+            "icp6": 64,
+            "ic07": 128,
+            "ic08": 256,
+            "ic09": 512,
+            "ic10": 1024,
+            "ic11": 32,
+            "ic12": 64,
+            "ic13": 256,
+            "ic14": 512,
         }
         resized = {}
         for kind, size in representations.items():
             if size not in resized:
                 output = Path(temporary) / f"{size}.png"
-                subprocess.run(["sips", "-z", str(size), str(size), str(source), "--out", str(output)],
-                               check=True, stdout=subprocess.DEVNULL)
+                subprocess.run(
+                    ["sips", "-z", str(size), str(size), str(source), "--out", str(output)],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                )
                 resized[size] = output.read_bytes()
             data = resized[size]
             chunks.append(kind.encode("ascii") + struct.pack(">I", len(data) + 8) + data)
@@ -37,8 +49,14 @@ def build_icon(source: Path, destination: Path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--python", default=sys.executable, help="Backend Python interpreter (defaults to this Python).")
-    parser.add_argument("--disable-swift-sandbox", action="store_true", help="For environments that cannot run SwiftPM's nested build sandbox.")
+    parser.add_argument(
+        "--python", default=sys.executable, help="Backend Python interpreter (defaults to this Python)."
+    )
+    parser.add_argument(
+        "--disable-swift-sandbox",
+        action="store_true",
+        help="For environments that cannot run SwiftPM's nested build sandbox.",
+    )
     args = parser.parse_args()
     python = shutil.which(args.python)
     if not python:
@@ -56,8 +74,22 @@ def main():
     # The default builder in the current toolchain records SDK 14 in the binary
     # even with --sdk; the native builder correctly records the installed SDK.
     sdk = subprocess.check_output(["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True).strip()
-    options = ["--package-path", str(package), "--build-system", "native", "--sdk", sdk, "-c", "release", "--cache-path", str(package / ".build/cache"),
-               "--config-path", str(package / ".build/config"), "--security-path", str(package / ".build/security")]
+    options = [
+        "--package-path",
+        str(package),
+        "--build-system",
+        "native",
+        "--sdk",
+        sdk,
+        "-c",
+        "release",
+        "--cache-path",
+        str(package / ".build/cache"),
+        "--config-path",
+        str(package / ".build/config"),
+        "--security-path",
+        str(package / ".build/security"),
+    ]
     if args.disable_swift_sandbox:
         options.append("--disable-sandbox")
     subprocess.run(["swift", "build", *options], env=environment, check=True)
@@ -77,21 +109,26 @@ def main():
     for bundle in Path(binary_directory).glob("*.bundle"):
         shutil.copytree(bundle, resources / bundle.name)
     build_icon(package / "Sources/MacDev/Resources/AppIcon.png", resources / "MacDev.icns")
-    shutil.copytree(root / "src/macdev", resources / "backend/macdev", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copytree(
+        root / "src/macdev", resources / "backend/macdev", ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+    )
     (resources / "Backend.json").write_text(json.dumps({"pythonExecutable": python}))
     with (contents / "Info.plist").open("wb") as output:
-        plistlib.dump({
-            "CFBundleExecutable": "MacDev",
-            "CFBundleIdentifier": "local.macdev.desktop",
-            "CFBundleName": "MacDev",
-            "CFBundleDisplayName": "MacDev",
-            "CFBundlePackageType": "APPL",
-            "CFBundleIconFile": "MacDev.icns",
-            "CFBundleShortVersionString": "0.1.0",
-            "CFBundleVersion": "1",
-            "LSMinimumSystemVersion": "14.0",
-            "NSHighResolutionCapable": True,
-        }, output)
+        plistlib.dump(
+            {
+                "CFBundleExecutable": "MacDev",
+                "CFBundleIdentifier": "local.macdev.desktop",
+                "CFBundleName": "MacDev",
+                "CFBundleDisplayName": "MacDev",
+                "CFBundlePackageType": "APPL",
+                "CFBundleIconFile": "MacDev.icns",
+                "CFBundleShortVersionString": "0.1.0",
+                "CFBundleVersion": "1",
+                "LSMinimumSystemVersion": "14.0",
+                "NSHighResolutionCapable": True,
+            },
+            output,
+        )
     subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
     print(f"Built {app}\nOpen it in Finder, or run: open '{app}'")
 

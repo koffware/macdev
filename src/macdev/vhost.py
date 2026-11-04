@@ -1,4 +1,5 @@
 """Virtual host management commands."""
+
 import re
 import sys
 from pathlib import Path
@@ -9,8 +10,8 @@ from rich.table import Table
 from .config import NGINX_LOG_DIR, NGINX_SERVERS_DIR
 from .nginx import reload_nginx
 from .php import get_active_version, get_extra_modules, get_fpm_socket, get_installed_versions
-from .ssl import generate_cert
 from .sites import read_sites
+from .ssl import generate_cert
 from .utils import collapse_home, console, err_console
 
 
@@ -90,12 +91,9 @@ def vhost():
 @vhost.command("create")
 @click.argument("domain")
 @click.argument("root", type=click.Path(), default=None, required=False)
-@click.option("--php", "php_version", default=None,
-              help="PHP version to use (default: active PHP on PATH).")
-@click.option("--cert", default=None,
-              help="Path to an existing SSL certificate (.pem). Skips mkcert generation.")
-@click.option("--key", default=None,
-              help="Path to an existing SSL certificate key. Skips mkcert generation.")
+@click.option("--php", "php_version", default=None, help="PHP version to use (default: active PHP on PATH).")
+@click.option("--cert", default=None, help="Path to an existing SSL certificate (.pem). Skips mkcert generation.")
+@click.option("--key", default=None, help="Path to an existing SSL certificate key. Skips mkcert generation.")
 def vhost_create(domain: str, root: str | None, php_version: str | None, cert: str | None, key: str | None):
     """Create a new nginx vhost for DOMAIN pointing at ROOT directory.
 
@@ -127,19 +125,13 @@ def vhost_create(domain: str, root: str | None, php_version: str | None, cert: s
     if php_version is None:
         php_version = get_active_version()
         if php_version is None:
-            err_console.print(
-                "[red]Could not detect active PHP version.[/red] "
-                "Use --php to specify one explicitly."
-            )
+            err_console.print("[red]Could not detect active PHP version.[/red] Use --php to specify one explicitly.")
             sys.exit(1)
         console.print(f"[dim]No --php specified, using active PHP {php_version}.[/dim]")
 
     installed = get_installed_versions()
     if php_version not in installed:
-        err_console.print(
-            f"[red]PHP {php_version} is not installed.[/red] "
-            f"Installed: {', '.join(installed) or 'none'}"
-        )
+        err_console.print(f"[red]PHP {php_version} is not installed.[/red] Installed: {', '.join(installed) or 'none'}")
         sys.exit(1)
 
     if bool(cert) != bool(key):

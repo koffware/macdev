@@ -1,6 +1,5 @@
 import AppKit
 import MacDevCore
-import SwiftUI
 
 @MainActor
 final class SiteStore: ObservableObject {
@@ -46,9 +45,12 @@ final class SiteStore: ObservableObject {
     init(backend: Backend? = nil) {
         backendOverride = backend
         let resourceDirectory = Bundle.main.resourceURL
-        let configuration = resourceDirectory.flatMap { try? Data(contentsOf: $0.appendingPathComponent("Backend.json")) }
-            .flatMap { try? JSONDecoder().decode(Configuration.self, from: $0) }
-        pythonExecutable = UserDefaults.standard.string(forKey: "pythonExecutable")
+        let configuration = resourceDirectory.flatMap {
+            try? Data(contentsOf: $0.appendingPathComponent("Backend.json"))
+        }
+        .flatMap { try? JSONDecoder().decode(Configuration.self, from: $0) }
+        pythonExecutable =
+            UserDefaults.standard.string(forKey: "pythonExecutable")
             ?? configuration?.pythonExecutable ?? "/opt/homebrew/bin/python3"
         let bundled = resourceDirectory?.appendingPathComponent("backend")
         if let bundled, FileManager.default.fileExists(atPath: bundled.appendingPathComponent("macdev/api.py").path) {
@@ -65,10 +67,14 @@ final class SiteStore: ObservableObject {
 
     var selectedSite: Site? { sites.first { $0.id == selection } }
     var filteredSites: [Site] {
-        sites.filter { search.isEmpty || $0.domain.localizedCaseInsensitiveContains(search)
-            || ($0.root?.localizedCaseInsensitiveContains(search) ?? false) }
+        sites.filter {
+            search.isEmpty || $0.domain.localizedCaseInsensitiveContains(search)
+                || ($0.root?.localizedCaseInsensitiveContains(search) ?? false)
+        }
     }
-    private var backend: Backend { backendOverride ?? Backend(pythonExecutable: pythonExecutable, sourceDirectory: sourceDirectory) }
+    private var backend: Backend {
+        backendOverride ?? Backend(pythonExecutable: pythonExecutable, sourceDirectory: sourceDirectory)
+    }
 
     func preload() async {
         guard !didPreload else { return }
@@ -114,7 +120,8 @@ final class SiteStore: ObservableObject {
         defer { isBusy = false }
         do {
             try await loadSnapshot()
-            status = "\(sites.count) \(sites.count == 1 ? "site" : "sites") · Updated \(Date.now.formatted(date: .omitted, time: .shortened))"
+            status =
+                "\(sites.count) \(sites.count == 1 ? "site" : "sites") · Updated \(Date.now.formatted(date: .omitted, time: .shortened))"
         } catch {
             self.error = error.localizedDescription
             status = hasLoaded ? "Could not refresh · Showing previously loaded sites" : "Could not connect to MacDev"
@@ -159,8 +166,7 @@ final class SiteStore: ObservableObject {
             // configuration change and would cache stale settings and revision.
             let backend = backend
             task = Task {
-                do { return .success(try await backend.phpDetails(version: version)) }
-                catch { return .failure(error) }
+                do { return .success(try await backend.phpDetails(version: version)) } catch { return .failure(error) }
             }
             phpLoads[version] = task
         }
@@ -177,7 +183,9 @@ final class SiteStore: ObservableObject {
 
     private func showPHP(_ result: Result<PHPDetails, Error>) {
         switch result {
-        case .success(let details): phpDetails = details; phpError = nil
+        case .success(let details):
+            phpDetails = details
+            phpError = nil
         case .failure(let error): phpError = error.localizedDescription
         }
     }
@@ -186,7 +194,12 @@ final class SiteStore: ObservableObject {
         let requestID = UUID()
         phpRequestID = requestID
         let version = phpVersion
-        guard !version.isEmpty else { phpDetails = nil; phpError = nil; isLoadingPHP = false; return }
+        guard !version.isEmpty else {
+            phpDetails = nil
+            phpError = nil
+            isLoadingPHP = false
+            return
+        }
         if !force, phpLoads[version] == nil, let cached = phpCache[version] {
             if phpDetails?.version != version { phpDetails = nil }
             showPHP(cached)
@@ -201,10 +214,12 @@ final class SiteStore: ObservableObject {
         if phpRequestID == requestID { showPHP(result) }
     }
 
-    private func perform(_ message: String, success: String,
-                         affectedPHPVersion: String? = nil,
-                         invalidatesServices: Bool = true,
-                         action: () async throws -> Void) async -> Bool {
+    private func perform(
+        _ message: String, success: String,
+        affectedPHPVersion: String? = nil,
+        invalidatesServices: Bool = true,
+        action: () async throws -> Void
+    ) async -> Bool {
         guard !isBusy else { return false }
         isBusy = true
         error = nil
@@ -212,10 +227,18 @@ final class SiteStore: ObservableObject {
         status = message
         defer { isBusy = false }
         var succeeded = false
-        do { try await action(); status = success; succeeded = true }
-        catch { self.error = error.localizedDescription; status = "Operation failed" }
-        do { try await loadSnapshot() }
-        catch { self.error = [self.error, "Could not refresh: \(error.localizedDescription)"].compactMap { $0 }.joined(separator: "\n") }
+        do {
+            try await action()
+            status = success
+            succeeded = true
+        } catch {
+            self.error = error.localizedDescription
+            status = "Operation failed"
+        }
+        do { try await loadSnapshot() } catch {
+            self.error = [self.error, "Could not refresh: \(error.localizedDescription)"].compactMap { $0 }.joined(
+                separator: "\n")
+        }
         // Service status rarely changes here; re-read it when the page is next shown.
         if invalidatesServices { hasLoadedServices = false }
         if selection == "section:services" { await loadServices() }
@@ -226,11 +249,14 @@ final class SiteStore: ObservableObject {
         return succeeded
     }
 
-    func saveSite(_ site: Site?, domain: String, root: String, version: String,
-                  certificate: String, key: String) async -> Bool {
+    func saveSite(
+        _ site: Site?, domain: String, root: String, version: String,
+        certificate: String, key: String
+    ) async -> Bool {
         await perform(site == nil ? "Creating site…" : "Saving site…", success: "Site saved") {
-            let result = try await backend.saveSite(site: site, domain: domain, root: root,
-                                                    version: version, certificate: certificate, key: key)
+            let result = try await backend.saveSite(
+                site: site, domain: domain, root: root,
+                version: version, certificate: certificate, key: key)
             selection = result.id
             search = ""
         }
@@ -244,8 +270,10 @@ final class SiteStore: ObservableObject {
     }
 
     func controlService(_ service: Service, action: String) async {
-        let succeeded = await perform("\(action.capitalized) \(service.name)…", success: "\(service.name): \(action) completed",
-                                      invalidatesServices: false) {
+        let succeeded = await perform(
+            "\(action.capitalized) \(service.name)…", success: "\(service.name): \(action) completed",
+            invalidatesServices: false
+        ) {
             let result = try await backend.serviceAction(service, action: action)
             services = result.services
             servicesError = nil
@@ -257,14 +285,19 @@ final class SiteStore: ObservableObject {
     }
 
     func savePHP(_ details: PHPDetails, values: [String: String]) async -> Bool {
-        await perform("Saving PHP \(details.version) settings…", success: "PHP settings saved", affectedPHPVersion: details.version) {
+        await perform(
+            "Saving PHP \(details.version) settings…", success: "PHP settings saved",
+            affectedPHPVersion: details.version
+        ) {
             warning = try await backend.savePHPSettings(details, values: values).warning
         }
     }
 
     func manageExtension(_ details: PHPDetails, name: String, action: String) async -> Bool {
-        await perform("\(action.capitalized) \(name) for PHP \(details.version)…",
-                      success: "Extension \(action) completed", affectedPHPVersion: details.version) {
+        await perform(
+            "\(action.capitalized) \(name) for PHP \(details.version)…",
+            success: "Extension \(action) completed", affectedPHPVersion: details.version
+        ) {
             warning = try await backend.extensionAction(details, name: name, action: action).warning
         }
     }
@@ -282,15 +315,16 @@ final class SiteStore: ObservableObject {
         defer { isBusy = false }
         do {
             let result = try await backend.switchPHP(siteID: site.id, version: version)
-            status = result.changed ? "\(site.domain) now uses PHP \(version)" : "\(site.domain) already uses PHP \(version)"
+            status =
+                result.changed ? "\(site.domain) now uses PHP \(version)" : "\(site.domain) already uses PHP \(version)"
         } catch {
             self.error = error.localizedDescription
             status = "PHP change failed"
         }
         // Refresh even on failure: disk state may have been restored by the backend.
-        do { try await loadSnapshot() }
-        catch {
-            self.error = [self.error, "Could not refresh sites: \(error.localizedDescription)"].compactMap { $0 }.joined(separator: "\n")
+        do { try await loadSnapshot() } catch {
+            self.error = [self.error, "Could not refresh sites: \(error.localizedDescription)"].compactMap { $0 }
+                .joined(separator: "\n")
         }
     }
 

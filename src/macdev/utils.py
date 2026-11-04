@@ -1,4 +1,5 @@
 """Shared helpers."""
+
 import subprocess
 from pathlib import Path
 
@@ -22,7 +23,7 @@ def collapse_home(path: str | Path) -> str:
 def run(cmd: list[str], *, sudo: bool = False, check: bool = True) -> subprocess.CompletedProcess:
     """Run a command, optionally with sudo, printing it first."""
     if sudo:
-        cmd = ["sudo"] + cmd
+        cmd = ["sudo", *cmd]
     console.print(f"[dim]$ {' '.join(cmd)}[/dim]")
     return subprocess.run(cmd, check=check)
 

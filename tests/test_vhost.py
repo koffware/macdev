@@ -1,17 +1,17 @@
 """Tests for macdev.vhost."""
+
 from pathlib import Path
 from unittest import mock
 
-import pytest
 from click.testing import CliRunner
 
 from macdev.cli import cli
 from macdev.vhost import _extract
 
-
 # ---------------------------------------------------------------------------
 # _extract — pure regex helper
 # ---------------------------------------------------------------------------
+
 
 class TestExtract:
     def test_finds_server_name(self):
@@ -30,8 +30,14 @@ class TestExtract:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_conf(servers_dir: Path, domain: str, root: str = "/var/www/app",
-               fpm: str = "127.0.0.1:9082", cert: str = "/certs/cert.pem") -> Path:
+
+def _make_conf(
+    servers_dir: Path,
+    domain: str,
+    root: str = "/var/www/app",
+    fpm: str = "127.0.0.1:9082",
+    cert: str = "/certs/cert.pem",
+) -> Path:
     conf = servers_dir / f"{domain}.conf"
     conf.write_text(
         f"server {{\n"
@@ -54,6 +60,7 @@ def _runner_with_patches(tmp_servers: Path):
 # vhost list
 # ---------------------------------------------------------------------------
 
+
 class TestVhostList:
     def test_empty_dir(self, tmp_path):
         runner = CliRunner()
@@ -71,9 +78,10 @@ class TestVhostList:
         with mock.patch("macdev.cli.check_requirements"):
             with mock.patch("macdev.vhost.NGINX_SERVERS_DIR", tmp_path):
                 with mock.patch("macdev.vhost.get_installed_versions", return_value=["8.2", "8.4"]):
-                    with mock.patch("macdev.vhost.get_fpm_socket", side_effect=lambda v: {
-                        "8.2": "127.0.0.1:9082", "8.4": "127.0.0.1:9084"
-                    }.get(v)):
+                    with mock.patch(
+                        "macdev.vhost.get_fpm_socket",
+                        side_effect={"8.2": "127.0.0.1:9082", "8.4": "127.0.0.1:9084"}.get,
+                    ):
                         result = runner.invoke(cli, ["vhost", "list"])
 
         assert result.exit_code == 0
@@ -84,6 +92,7 @@ class TestVhostList:
 # ---------------------------------------------------------------------------
 # vhost remove
 # ---------------------------------------------------------------------------
+
 
 class TestVhostRemove:
     def test_removes_existing_conf(self, tmp_path):
@@ -109,6 +118,7 @@ class TestVhostRemove:
 # ---------------------------------------------------------------------------
 # vhost info
 # ---------------------------------------------------------------------------
+
 
 class TestVhostInfo:
     def test_shows_info(self, tmp_path):
@@ -136,6 +146,7 @@ class TestVhostInfo:
 # ---------------------------------------------------------------------------
 # vhost create
 # ---------------------------------------------------------------------------
+
 
 class TestVhostCreate:
     def test_cert_without_key_fails(self, tmp_path):
@@ -185,11 +196,16 @@ class TestVhostCreate:
                                     result = runner.invoke(
                                         cli,
                                         [
-                                            "vhost", "create", "myapp.test",
+                                            "vhost",
+                                            "create",
+                                            "myapp.test",
                                             str(root_dir),
-                                            "--php", "8.2",
-                                            "--cert", str(cert_path),
-                                            "--key", str(key_path),
+                                            "--php",
+                                            "8.2",
+                                            "--cert",
+                                            str(cert_path),
+                                            "--key",
+                                            str(key_path),
                                         ],
                                     )
 

@@ -1,11 +1,9 @@
 """Tests for macdev.php."""
+
 import subprocess
 from pathlib import Path
 from unittest import mock
 
-import pytest
-
-import macdev.php as php_mod
 from macdev.php import (
     _domain_for_cwd,
     _update_conf,
@@ -16,18 +14,16 @@ from macdev.php import (
     get_service_name,
 )
 
-
 # ---------------------------------------------------------------------------
 # get_installed_versions
 # ---------------------------------------------------------------------------
+
 
 class TestGetInstalledVersions:
     def _mock_brew_list(self, output: str):
         return mock.patch(
             "macdev.php.subprocess.run",
-            return_value=subprocess.CompletedProcess(
-                args=["brew", "list", "--formula"], returncode=0, stdout=output
-            ),
+            return_value=subprocess.CompletedProcess(args=["brew", "list", "--formula"], returncode=0, stdout=output),
         )
 
     def test_versioned_formulas(self):
@@ -66,6 +62,7 @@ class TestGetInstalledVersions:
 # get_active_version
 # ---------------------------------------------------------------------------
 
+
 class TestGetActiveVersion:
     def test_returns_version_string(self):
         with mock.patch("macdev.php._version_from_binary", return_value="8.3"):
@@ -79,6 +76,7 @@ class TestGetActiveVersion:
 # ---------------------------------------------------------------------------
 # get_service_name
 # ---------------------------------------------------------------------------
+
 
 class TestGetServiceName:
     def test_versioned_formula(self):
@@ -98,6 +96,7 @@ class TestGetServiceName:
 # ---------------------------------------------------------------------------
 # get_fpm_socket
 # ---------------------------------------------------------------------------
+
 
 class TestGetFpmSocket:
     def test_versioned_path(self, tmp_path):
@@ -134,9 +133,7 @@ class TestGetFpmSocket:
         version = "8.3"
         conf_dir = tmp_path / version / "php-fpm.d"
         conf_dir.mkdir(parents=True)
-        (conf_dir / "www.conf").write_text(
-            "[www]\nuser = www-data\nlisten = /run/php/php8.3-fpm.sock\n"
-        )
+        (conf_dir / "www.conf").write_text("[www]\nuser = www-data\nlisten = /run/php/php8.3-fpm.sock\n")
         with mock.patch("macdev.php.PHP_ETC_DIR", tmp_path):
             socket = get_fpm_socket(version)
         assert socket == "/run/php/php8.3-fpm.sock"
@@ -146,14 +143,14 @@ class TestGetFpmSocket:
 # get_extra_modules
 # ---------------------------------------------------------------------------
 
+
 class TestGetExtraModules:
     def test_returns_non_default_modules(self):
         with mock.patch("macdev.php._php_binary") as mock_bin:
             mock_bin.return_value = Path("/opt/homebrew/bin/php")
             with mock.patch("macdev.php.subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=[], returncode=0,
-                    stdout="[PHP Modules]\nbcmath\nxdebug\nredis\nopenssl\n"
+                    args=[], returncode=0, stdout="[PHP Modules]\nbcmath\nxdebug\nredis\nopenssl\n"
                 )
                 modules = get_extra_modules("8.2")
         assert "xdebug" in modules
@@ -170,9 +167,7 @@ class TestGetExtraModules:
         with mock.patch("macdev.php._php_binary") as mock_bin:
             mock_bin.return_value = Path("/opt/homebrew/bin/php")
             with mock.patch("macdev.php.subprocess.run") as mock_run:
-                mock_run.return_value = subprocess.CompletedProcess(
-                    args=[], returncode=1, stdout=""
-                )
+                mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1, stdout="")
                 modules = get_extra_modules("8.2")
         assert modules == []
 
@@ -181,14 +176,11 @@ class TestGetExtraModules:
 # _update_conf
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateConf:
     def test_updates_fastcgi_pass(self, tmp_path):
         conf = tmp_path / "myapp.test.conf"
-        conf.write_text(
-            "server {\n"
-            "    fastcgi_pass 127.0.0.1:9082;\n"
-            "}\n"
-        )
+        conf.write_text("server {\n    fastcgi_pass 127.0.0.1:9082;\n}\n")
         changed = _update_conf(conf, "127.0.0.1:9084")
         assert changed is True
         assert "fastcgi_pass 127.0.0.1:9084;" in conf.read_text()
@@ -212,6 +204,7 @@ class TestUpdateConf:
 # _domain_for_cwd
 # ---------------------------------------------------------------------------
 
+
 class TestDomainForCwd:
     def test_matches_root_directory(self, tmp_path):
         servers_dir = tmp_path / "servers"
@@ -220,12 +213,7 @@ class TestDomainForCwd:
         app_root.mkdir()
 
         conf = servers_dir / "myapp.test.conf"
-        conf.write_text(
-            f"server {{\n"
-            f"    server_name myapp.test;\n"
-            f"    root {app_root};\n"
-            f"}}\n"
-        )
+        conf.write_text(f"server {{\n    server_name myapp.test;\n    root {app_root};\n}}\n")
 
         with mock.patch("macdev.php.NGINX_SERVERS_DIR", servers_dir):
             with mock.patch("macdev.php.Path.cwd", return_value=app_root):
@@ -241,12 +229,7 @@ class TestDomainForCwd:
         public_dir.mkdir(parents=True)
 
         conf = servers_dir / "myapp.test.conf"
-        conf.write_text(
-            f"server {{\n"
-            f"    server_name myapp.test;\n"
-            f"    root {public_dir};\n"
-            f"}}\n"
-        )
+        conf.write_text(f"server {{\n    server_name myapp.test;\n    root {public_dir};\n}}\n")
 
         with mock.patch("macdev.php.NGINX_SERVERS_DIR", servers_dir):
             with mock.patch("macdev.php.Path.cwd", return_value=app_root):

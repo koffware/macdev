@@ -1,6 +1,7 @@
 import Foundation
-import XCTest
 import MacDevCore
+import XCTest
+
 @testable import MacDev
 
 final class SiteStoreTests: XCTestCase {
@@ -11,39 +12,39 @@ final class SiteStoreTests: XCTestCase {
         let executable = directory.appendingPathComponent("backend")
         // A protocol fixture: no Homebrew, PHP, nginx, or real configuration is accessed.
         let script = #"""
-        #!/bin/sh
-        printf '%s %s\n' "$3" "${5-}" >> "$0.calls"
-        case "$3" in
-          snapshot)
-            if [ -f "$0.fail-snapshot" ]; then
-              printf '%s' '{"protocol_version":1,"ok":false,"error":"Snapshot unavailable"}'
-              exit 1
-            fi
-            printf '%s' '{"protocol_version":1,"ok":true,"data":{"sites":[],"php_versions":["8.4","8.2"]}}'
-            ;;
-          services)
-            if [ -f "$0.fail-services" ]; then
-              printf '%s' '{"protocol_version":1,"ok":false,"error":"Services unavailable"}'
-              exit 1
-            fi
-            printf '%s' '{"protocol_version":1,"ok":true,"data":{"services":[{"name":"nginx","status":"started"}]}}'
-            ;;
-          php-details)
-            if [ -f "$0.fail-php-$5" ]; then
-              printf '%s' '{"protocol_version":1,"ok":false,"error":"PHP unavailable"}'
-              exit 1
-            fi
-            revision=original
-            if [ -f "$0.changed" ]; then revision=updated; fi
-            if [ -f "$0.slow-php-$5" ]; then touch "$0.read-php-$5"; sleep 0.5; fi
-            printf '{"protocol_version":1,"ok":true,"data":{"version":"%s","ini_path":"/tmp/php.ini","scan_directory":"/tmp/conf.d","settings":{"memory_limit":"512M"},"extensions":[],"revision":"%s","service":"php@%s","installer_available":true}}' "$5" "$revision" "$5"
-            ;;
-          php-settings)
-            touch "$0.changed"
-            printf '%s' '{"protocol_version":1,"ok":true,"data":{"changed":true}}'
-            ;;
-        esac
-        """#
+            #!/bin/sh
+            printf '%s %s\n' "$3" "${5-}" >> "$0.calls"
+            case "$3" in
+              snapshot)
+                if [ -f "$0.fail-snapshot" ]; then
+                  printf '%s' '{"protocol_version":1,"ok":false,"error":"Snapshot unavailable"}'
+                  exit 1
+                fi
+                printf '%s' '{"protocol_version":1,"ok":true,"data":{"sites":[],"php_versions":["8.4","8.2"]}}'
+                ;;
+              services)
+                if [ -f "$0.fail-services" ]; then
+                  printf '%s' '{"protocol_version":1,"ok":false,"error":"Services unavailable"}'
+                  exit 1
+                fi
+                printf '%s' '{"protocol_version":1,"ok":true,"data":{"services":[{"name":"nginx","status":"started"}]}}'
+                ;;
+              php-details)
+                if [ -f "$0.fail-php-$5" ]; then
+                  printf '%s' '{"protocol_version":1,"ok":false,"error":"PHP unavailable"}'
+                  exit 1
+                fi
+                revision=original
+                if [ -f "$0.changed" ]; then revision=updated; fi
+                if [ -f "$0.slow-php-$5" ]; then touch "$0.read-php-$5"; sleep 0.5; fi
+                printf '{"protocol_version":1,"ok":true,"data":{"version":"%s","ini_path":"/tmp/php.ini","scan_directory":"/tmp/conf.d","settings":{"memory_limit":"512M"},"extensions":[],"revision":"%s","service":"php@%s","installer_available":true}}' "$5" "$revision" "$5"
+                ;;
+              php-settings)
+                touch "$0.changed"
+                printf '%s' '{"protocol_version":1,"ok":true,"data":{"changed":true}}'
+                ;;
+            esac
+            """#
         try script.write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
         return (executable, Backend(pythonExecutable: executable.path, sourceDirectory: directory))
@@ -61,10 +62,15 @@ final class SiteStoreTests: XCTestCase {
     private func marker(_ executable: URL, _ name: String) -> String { executable.path + "." + name }
 
     @MainActor
-    private func waitUntil(_ condition: @MainActor () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+    private func waitUntil(_ condition: @MainActor () -> Bool, file: StaticString = #filePath, line: UInt = #line)
+        async throws
+    {
         let deadline = Date.now.addingTimeInterval(5)
         while !condition() {
-            guard Date.now < deadline else { return XCTFail("Timed out waiting for condition", file: file, line: line) }
+            guard Date.now < deadline else {
+                XCTFail("Timed out waiting for condition", file: file, line: line)
+                return
+            }
             try await Task.sleep(for: .milliseconds(10))
         }
     }
@@ -114,7 +120,8 @@ final class SiteStoreTests: XCTestCase {
         await store.loadPHP()
         XCTAssertEqual(try calls(executable, command: "php-details").count, 2)
         await store.loadServices()
-        XCTAssertEqual(try calls(executable, command: "services").count, 2, "A failed services read is retried on the next visit")
+        XCTAssertEqual(
+            try calls(executable, command: "services").count, 2, "A failed services read is retried on the next visit")
 
         try FileManager.default.removeItem(atPath: executable.path + ".fail-php-8.2")
         try FileManager.default.removeItem(atPath: executable.path + ".fail-services")
@@ -191,7 +198,10 @@ final class SiteStoreTests: XCTestCase {
         try Data().write(to: URL(fileURLWithPath: marker(executable, "slow-php-8.2")))
         let store = SiteStore(backend: backend)
         var finished = false
-        let preload = Task { await store.preload(); finished = true }
+        let preload = Task {
+            await store.preload()
+            finished = true
+        }
         try await waitUntil { !store.isStarting }
         XCTAssertFalse(finished, "The splash should not wait for non-selected PHP versions")
         XCTAssertEqual(store.phpDetails?.version, "8.4")

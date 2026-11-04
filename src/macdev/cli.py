@@ -1,8 +1,9 @@
 """macdev — macOS local dev server management CLI."""
+
 import click
 
-from .checks import check_requirements
 from .api import api
+from .checks import check_requirements
 from .nginx import nginx
 from .php import php
 from .ssl import ssl

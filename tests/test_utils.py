@@ -1,9 +1,8 @@
 """Tests for macdev.utils."""
+
 import subprocess
 from pathlib import Path
 from unittest import mock
-
-import pytest
 
 from macdev.utils import collapse_home, run
 
@@ -37,18 +36,14 @@ class TestCollapseHome:
 class TestRun:
     def test_runs_command_and_returns_result(self):
         with mock.patch("macdev.utils.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=["echo", "hi"], returncode=0
-            )
+            mock_run.return_value = subprocess.CompletedProcess(args=["echo", "hi"], returncode=0)
             result = run(["echo", "hi"])
             mock_run.assert_called_once_with(["echo", "hi"], check=True)
             assert result.returncode == 0
 
     def test_prepends_sudo_when_requested(self):
         with mock.patch("macdev.utils.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=["sudo", "nginx", "-s", "reload"], returncode=0
-            )
+            mock_run.return_value = subprocess.CompletedProcess(args=["sudo", "nginx", "-s", "reload"], returncode=0)
             run(["nginx", "-s", "reload"], sudo=True)
             called_cmd = mock_run.call_args[0][0]
             assert called_cmd[0] == "sudo"
@@ -56,8 +51,6 @@ class TestRun:
 
     def test_check_false_passes_through(self):
         with mock.patch("macdev.utils.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=["false"], returncode=1
-            )
+            mock_run.return_value = subprocess.CompletedProcess(args=["false"], returncode=1)
             run(["false"], check=False)
             mock_run.assert_called_once_with(["false"], check=False)

@@ -37,15 +37,21 @@ struct SiteEditor: View {
                     certificateField("Certificate", value: $certificate)
                     certificateField("Private key", value: $key)
                 } else {
-                    Text(site == nil ? "MacDev generates a certificate using your existing mkcert authority. Set up trust once with mkcert -install if needed."
-                         : "The current certificate is kept. Renaming an HTTPS domain generates a certificate for the new name.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(
+                        site == nil
+                            ? "MacDev generates a certificate using your existing mkcert authority. Set up trust once with mkcert -install if needed."
+                            : "The current certificate is kept. Renaming an HTTPS domain generates a certificate for the new name."
+                    )
+                    .font(.caption).foregroundStyle(.secondary)
                 }
             }
             .textFieldStyle(.roundedBorder)
             if let error = store.error {
-                ScrollView { Text(error).foregroundStyle(.red).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                    .frame(maxHeight: 100)
+                ScrollView {
+                    Text(error).foregroundStyle(.red).textSelection(.enabled).frame(
+                        maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 100)
             }
             HStack {
                 if store.isBusy { ProgressView().controlSize(.small) }
@@ -53,14 +59,20 @@ struct SiteEditor: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(store.isBusy)
                 Button(site == nil ? "Create Site" : "Save Changes") {
                     Task {
-                        if await store.saveSite(site, domain: domain.trimmingCharacters(in: .whitespaces), root: root,
-                                                version: version, certificate: useCustomCertificate ? certificate : "",
-                                                key: useCustomCertificate ? key : "") { dismiss() }
+                        if await store.saveSite(
+                            site, domain: domain.trimmingCharacters(in: .whitespaces), root: root,
+                            version: version, certificate: useCustomCertificate ? certificate : "",
+                            key: useCustomCertificate ? key : "")
+                        {
+                            dismiss()
+                        }
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(store.isBusy || domain.isEmpty || root.isEmpty || ((site == nil || site?.fpm != nil) && version.isEmpty)
-                          || (useCustomCertificate && (certificate.isEmpty || key.isEmpty)))
+                .disabled(
+                    store.isBusy || domain.isEmpty || root.isEmpty
+                        || ((site == nil || site?.fpm != nil) && version.isEmpty)
+                        || (useCustomCertificate && (certificate.isEmpty || key.isEmpty)))
             }
         }
         .padding(24).frame(width: 630)

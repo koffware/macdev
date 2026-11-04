@@ -1,4 +1,5 @@
 """Pre-flight requirements checks."""
+
 import shutil
 import subprocess
 import sys
@@ -16,10 +17,7 @@ def check_requirements() -> None:
 
 def _check_homebrew() -> None:
     if shutil.which("brew") is None:
-        err_console.print(
-            "[red]Homebrew is not installed.[/red] "
-            "See https://brew.sh for installation instructions."
-        )
+        err_console.print("[red]Homebrew is not installed.[/red] See https://brew.sh for installation instructions.")
         sys.exit(1)
 
 
@@ -27,28 +25,25 @@ def _check_brew_package(formula: str, *, install_hint: str) -> None:
     result = subprocess.run(
         ["brew", "list", "--formula", formula],
         capture_output=True,
+        check=False,
     )
     if result.returncode != 0:
-        err_console.print(
-            f"[red]{formula} is not installed.[/red] "
-            f"Run: [bold]{install_hint}[/bold]"
-        )
+        err_console.print(f"[red]{formula} is not installed.[/red] Run: [bold]{install_hint}[/bold]")
         sys.exit(1)
 
 
 def _check_php() -> None:
     result = subprocess.run(
         ["brew", "list", "--formula"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if result.returncode != 0:
         # brew itself failed; homebrew check already passed so just warn
         return
 
-    has_php = any(
-        line.strip() == "php" or line.strip().startswith("php@")
-        for line in result.stdout.splitlines()
-    )
+    has_php = any(line.strip() == "php" or line.strip().startswith("php@") for line in result.stdout.splitlines())
     if not has_php:
         err_console.print(
             "[red]No PHP version is installed via Homebrew.[/red] "
