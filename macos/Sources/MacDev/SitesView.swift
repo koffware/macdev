@@ -63,11 +63,21 @@ struct SitesView: View {
                 if let message = store.error ?? store.warning {
                     Divider()
                     VStack(alignment: .leading, spacing: 6) {
-                        Label(
-                            store.error == nil ? "Completed with a warning" : "MacDev needs your attention",
-                            systemImage: "exclamationmark.triangle.fill"
-                        )
-                        .fontWeight(.medium)
+                        HStack {
+                            Label(
+                                store.error == nil ? "Completed with a warning" : "MacDev needs your attention",
+                                systemImage: "exclamationmark.triangle.fill"
+                            )
+                            .fontWeight(.medium)
+                            .foregroundStyle(store.error == nil ? Color.orange : Color.red)
+                            Spacer()
+                            Button {
+                                store.dismissMessages()
+                            } label: {
+                                Image(systemName: "xmark")
+                            }
+                            .buttonStyle(.borderless).help("Dismiss").accessibilityLabel("Dismiss message")
+                        }
                         ScrollView {
                             Text(message).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -76,7 +86,7 @@ struct SitesView: View {
                     .font(.callout).padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.background)
-                    .accessibilityElement(children: .combine)
+                    .accessibilityElement(children: .contain)
                 }
                 Divider()
                 HStack(spacing: 8) {
@@ -88,6 +98,7 @@ struct SitesView: View {
                     Spacer()
                     if let backup = store.lastBackupPath {
                         Button("Show Backup") { store.revealFile(backup) }.font(.caption)
+                            .help("Show the last removed site’s configuration backup in Finder")
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 7)
@@ -160,7 +171,7 @@ struct SitesView: View {
                         .help(site.domain)
                     }
                     if !store.search.isEmpty && store.filteredSites.isEmpty {
-                        Text("No matching sites").foregroundStyle(.secondary)
+                        Text("No sites match “\(store.search)”").foregroundStyle(.secondary)
                     }
                 }
             }
@@ -197,10 +208,13 @@ struct SitesView: View {
                         Label {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(service.name)
-                                Text(service.status).font(.caption).foregroundStyle(.secondary)
+                                Text(service.statusTitle).font(.caption)
+                                    .foregroundStyle(service.hasError ? Color.red : Color.secondary)
                             }
                         } icon: {
-                            Image(systemName: service.isRunning ? "checkmark.circle" : "circle")
+                            Image(
+                                systemName: service.isRunning
+                                    ? "checkmark.circle" : (service.hasError ? "exclamationmark.circle" : "circle"))
                         }
                         .tag(service.id)
                     }
@@ -297,9 +311,15 @@ private struct SiteDetailView: View {
                                     ForEach(store.phpVersions, id: \.self) { Text("PHP \($0)").tag($0) }
                                 }
                                 .labelsHidden().frame(width: 155).disabled(store.isBusy)
-                                Button("Apply") { Task { await store.switchPHP(site: site, version: chosenVersion) } }
-                                    .buttonStyle(.borderedProminent)
-                                    .disabled(chosenVersion.isEmpty || chosenVersion == site.phpVersion || store.isBusy)
+                                Button("Switch PHP") {
+                                    Task { await store.switchPHP(site: site, version: chosenVersion) }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(chosenVersion.isEmpty || chosenVersion == site.phpVersion || store.isBusy)
+                                .help(
+                                    chosenVersion == site.phpVersion
+                                        ? "This site already uses PHP \(chosenVersion)"
+                                        : "Switch this site to PHP \(chosenVersion) and reload nginx")
                             } else {
                                 Text(
                                     site.phpVersion.map { "PHP \($0)" }
@@ -357,7 +377,7 @@ private struct SiteDetailView: View {
             Text(site.domain).font(.title2.weight(.semibold)).textSelection(.enabled)
                 .lineLimit(1).truncationMode(.middle).help(site.domain)
             Label(
-                site.certificate == nil ? "HTTP site" : "SSL configured",
+                site.certificate == nil ? "HTTP only · no certificate" : "HTTPS · certificate configured",
                 systemImage: site.certificate == nil ? "globe" : "lock.fill"
             )
             .font(.callout).foregroundStyle(.secondary)
@@ -372,20 +392,32 @@ private struct SiteDetailView: View {
                 Label("Open Site", systemImage: "arrow.up.right.square")
             }
             .buttonStyle(.borderedProminent).disabled(site.url == nil)
+            .help(
+                site.url.map { "Open \($0.absoluteString) in your browser" }
+                    ?? "This server name is a pattern, so it has no single address to open")
             Button {
                 editingSite = site
             } label: {
                 Label("Edit Site", systemImage: "pencil")
             }
             .disabled(store.isBusy || site.canEdit != true)
+            .help(
+                site.canEdit == true
+                    ? "Change the domain, folder, PHP version, or certificate"
+                    : "This configuration was not created by MacDev and can only be edited by hand")
             Menu {
+                if let url = site.url {
+                    Button("Copy Site Address") { store.copyToPasteboard(url.absoluteString, label: "site address") }
+                }
+                Button("Show nginx Configuration in Finder") { store.revealFile(site.configPath) }
+                Divider()
                 Button("Remove Site…", role: .destructive) { confirmingRemoval = true }
                     .disabled(store.isBusy || site.canDelete != true)
             } label: {
                 Image(systemName: "ellipsis")
             }
-            .menuStyle(.borderlessButton).fixedSize().frame(width: 28)
-            .accessibilityLabel("More site actions")
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 28)
+            .help("More actions").accessibilityLabel("More site actions")
         }.fixedSize()
     }
 
@@ -395,12 +427,11 @@ private struct SiteDetailView: View {
             PathText(value: value)
             Spacer(minLength: 0)
             Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(value, forType: .string)
+                store.copyToPasteboard(value, label: "\(title.lowercased()) path")
             } label: {
                 Image(systemName: "doc.on.doc")
             }
-            .buttonStyle(.borderless).help("Copy \(title)").accessibilityLabel("Copy \(title)")
+            .buttonStyle(.borderless).help("Copy \(title) Path").accessibilityLabel("Copy \(title) path")
             Button {
                 store.revealFile(value)
             } label: {

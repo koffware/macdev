@@ -91,7 +91,7 @@ per-extension files are reused to preserve their settings and load order;
 otherwise MacDev creates `50-macdev-ext-<module>.ini`.
 
 For extensions already declared in `php.ini` or declared more than once, use
-**PHP → Extensions → Separate INI**. This preserves the enabled/disabled state,
+**PHP → Extensions → Move to Own INI**. This preserves the enabled/disabled state,
 comments out active duplicate declarations, and keeps one load declaration in a
 separate file. Unrelated settings and existing comments remain intact. Validation,
 restart, stale-revision protection, and rollback apply to this operation too.

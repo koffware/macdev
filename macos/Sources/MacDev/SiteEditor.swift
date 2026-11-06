@@ -19,7 +19,9 @@ struct SiteEditor: View {
             Form {
                 TextField("Domain", text: $domain, prompt: Text("myapp.test"))
                 HStack {
-                    TextField(site == nil ? "Project folder" : "Document root", text: $root)
+                    TextField(
+                        site == nil ? "Project folder" : "Document root", text: $root,
+                        prompt: Text("~/workspace/myapp"))
                     Button("Choose…") { chooseFolder() }
                 }
                 if site == nil {
@@ -34,8 +36,8 @@ struct SiteEditor: View {
                 }
                 Toggle("Use an existing certificate and private key", isOn: $useCustomCertificate)
                 if useCustomCertificate {
-                    certificateField("Certificate", value: $certificate)
-                    certificateField("Private key", value: $key)
+                    certificateField("Certificate", value: $certificate, prompt: "certificate.pem")
+                    certificateField("Private key", value: $key, prompt: "certificate-key.pem")
                 } else {
                     Text(
                         site == nil
@@ -85,13 +87,16 @@ struct SiteEditor: View {
         }
     }
 
-    private func certificateField(_ title: String, value: Binding<String>) -> some View {
+    private func certificateField(_ title: String, value: Binding<String>, prompt: String) -> some View {
         HStack {
-            TextField(title, text: value)
+            TextField(title, text: value, prompt: Text(prompt))
             Button("Choose…") {
                 let panel = NSOpenPanel()
                 panel.canChooseDirectories = false
                 panel.allowsMultipleSelection = false
+                panel.message = "Choose the \(title.lowercased()) file in PEM format."
+                panel.prompt = "Choose"
+                panel.directoryURL = startDirectory(for: value.wrappedValue)
                 if panel.runModal() == .OK, let url = panel.url { value.wrappedValue = url.path }
             }
         }
@@ -102,6 +107,26 @@ struct SiteEditor: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.message =
+            site == nil
+            ? "Choose the project folder. MacDev uses its public folder as the document root if there is one."
+            : "Choose the folder nginx serves for this site."
+        panel.prompt = "Choose"
+        panel.directoryURL = startDirectory(for: root)
         if panel.runModal() == .OK, let url = panel.url { root = url.path }
+    }
+
+    /// Opens panels next to the current value instead of the last-used location.
+    private func startDirectory(for path: String) -> URL? {
+        guard !path.isEmpty else { return nil }
+        let expanded =
+            path.hasPrefix("~/")
+            ? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(String(path.dropFirst(2))).path
+            : path
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory) else { return nil }
+        let url = URL(fileURLWithPath: expanded)
+        return isDirectory.boolValue ? url : url.deletingLastPathComponent()
     }
 }

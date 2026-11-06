@@ -64,6 +64,20 @@ public struct Service: Decodable, Identifiable, Sendable {
     public let exitCode: Int?
     public var id: String { name }
     public var isRunning: Bool { status == "started" }
+    public var hasError: Bool { status == "error" }
+    public var isRegistered: Bool { status != "none" && status != "stopped" }
+    /// Homebrew's raw status words, phrased for people.
+    public var statusTitle: String {
+        switch status {
+        case "started": "Running"
+        case "stopped": "Stopped"
+        case "none": "Not started"
+        case "scheduled": "Scheduled"
+        case "error": "Error"
+        case "other": "Unknown state"
+        default: status.capitalized
+        }
+    }
     enum CodingKeys: String, CodingKey {
         case name, status, user
         case exitCode = "exit_code"

@@ -19,6 +19,13 @@ struct ServicesView: View {
             if selection == "all" {
                 List(visibleServices) { service in serviceRow(service) }
                     .listStyle(.inset(alternatesRowBackgrounds: true))
+                    .overlay {
+                        if store.services.isEmpty && !store.isLoadingServices && store.servicesError == nil {
+                            ContentUnavailableView(
+                                "No Homebrew services", systemImage: "server.rack",
+                                description: Text("Install nginx or PHP with Homebrew, then refresh."))
+                        }
+                    }
             } else if let service = visibleServices.first {
                 Text(service.name).font(.title2.weight(.semibold))
                 WorkspacePanel { serviceRow(service).padding(16) }
@@ -60,29 +67,32 @@ struct ServicesView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(service.name).fontWeight(.semibold)
                 Label(
-                    service.status + (service.exitCode.map { " · Exit \($0)" } ?? ""),
-                    systemImage: service.isRunning ? "checkmark.circle.fill" : "circle"
+                    service.statusTitle + (service.exitCode.map { $0 == 0 ? "" : " · Exit code \($0)" } ?? ""),
+                    systemImage: service.isRunning
+                        ? "checkmark.circle.fill" : (service.hasError ? "exclamationmark.circle.fill" : "circle")
                 )
-                .font(.caption).foregroundStyle(service.isRunning ? .green : .secondary)
+                .font(.caption)
+                .foregroundStyle(service.isRunning ? Color.green : (service.hasError ? Color.red : Color.secondary))
+                .help("Homebrew status: \(service.status)")
             }
             Spacer()
             Button(service.isRunning ? "Restart" : "Start") {
                 Task { await store.controlService(service, action: service.isRunning ? "restart" : "start") }
             }
+            .help(service.isRunning ? "Restart \(service.name)" : "Start \(service.name) and launch it at login")
             Menu {
-                Button("Restart") { Task { await store.controlService(service, action: "restart") } }
                 if service.name == "nginx" {
-                    Button("Reload") { Task { await store.controlService(service, action: "reload") } }
+                    Button("Reload Configuration") { Task { await store.controlService(service, action: "reload") } }
                         .disabled(!service.isRunning)
+                    Divider()
                 }
-                Divider()
                 Button("Stop…", role: .destructive) { stopping = service }
-                    .disabled(service.status == "none" || service.status == "stopped")
+                    .disabled(!service.isRegistered)
             } label: {
                 Image(systemName: "ellipsis")
             }
-            .menuStyle(.borderlessButton).fixedSize().frame(width: 24)
-            .accessibilityLabel("Actions for \(service.name)")
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 24)
+            .help("More actions").accessibilityLabel("Actions for \(service.name)")
         }
         .padding(.vertical, 6)
         .disabled(store.isBusy || store.isLoadingServices)

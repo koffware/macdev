@@ -13,6 +13,15 @@ final class BackendTests: XCTestCase {
         XCTAssertEqual(result.sites[0].url?.absoluteString, "http://app.test")
     }
 
+    func testServiceStatusTitles() throws {
+        let json =
+            #"[{"name":"nginx","status":"started"},{"name":"php","status":"none"},{"name":"db","status":"error","exit_code":1}]"#
+        let services = try JSONDecoder().decode([Service].self, from: Data(json.utf8))
+        XCTAssertEqual(services.map(\.statusTitle), ["Running", "Not started", "Error"])
+        XCTAssertEqual(services.map(\.isRegistered), [true, false, true])
+        XCTAssertTrue(services[2].hasError)
+    }
+
     func testPreservesStructuredFailureWithNonzeroExit() throws {
         let json = #"{"protocol_version":1,"ok":false,"error":"Configuration restored"}"#
         let response = try JSONDecoder().decode(Response<Snapshot>.self, from: Data(json.utf8))

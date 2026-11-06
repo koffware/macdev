@@ -57,6 +57,10 @@ private struct PHPSettingsEditor: View {
                     ForEach(fields, id: \.0) { key, title, example in
                         HStack {
                             Text(title)
+                            if values[key] != details.settings[key] {
+                                Text("Edited").font(.caption).foregroundStyle(.orange)
+                                    .accessibilityLabel("\(title) has unsaved changes")
+                            }
                             Spacer(minLength: 20)
                             TextField(
                                 title, text: Binding(get: { values[key] ?? "" }, set: { values[key] = $0 }),
@@ -83,9 +87,14 @@ private struct PHPSettingsEditor: View {
                     Text("Saving validates PHP and restarts this version’s service if it is running.")
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
+                    Button("Revert") { values = details.settings }
+                        .disabled(values == details.settings)
+                        .help("Discard unsaved changes")
                     Button("Save Configuration") { Task { _ = await store.savePHP(details, values: values) } }
                         .buttonStyle(.borderedProminent)
+                        .keyboardShortcut("s")
                         .disabled(store.isBusy || store.isLoadingPHP || values == details.settings || values.isEmpty)
+                        .help("Save and restart PHP \(details.version) if it is running (⌘S)")
                 }
                 DisclosureGroup("Configuration files") {
                     VStack(alignment: .leading, spacing: 12) {
@@ -93,6 +102,7 @@ private struct PHPSettingsEditor: View {
                             PathText(value: details.iniPath)
                             Spacer()
                             Button("Show in Finder") { store.revealFile(details.iniPath) }
+                                .help("Show the MacDev INI file for PHP \(details.version) in Finder")
                         }
                         Text(
                             "Changes are stored in a separate MacDev INI file. These are FPM defaults; individual pool or project settings may override them. The terminal may use a different php-cli.ini."
@@ -124,12 +134,21 @@ private struct ExtensionsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                TextField("Find an extension", text: $search).textFieldStyle(.roundedBorder)
+                TextField(
+                    "Find an extension", text: $search, prompt: Text("Filter \(details.extensions.count) extensions")
+                )
+                .textFieldStyle(.roundedBorder)
                 Button("Install Extension…") { installing = true }
                     .disabled(store.isBusy || store.isLoadingPHP || !details.installerAvailable)
+                    .help(
+                        details.installerAvailable
+                            ? "Install a PECL package for PHP \(details.version)"
+                            : "PECL is not available for PHP \(details.version), so extensions cannot be installed here"
+                    )
             }
             List(extensions) { item in
                 HStack {
+                    extensionStatusIcon(item)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.name).fontWeight(.medium)
                         Text(
@@ -142,7 +161,7 @@ private struct ExtensionsView: View {
                     }
                     Spacer()
                     if item.canSeparateIni == true {
-                        Button("Separate INI") {
+                        Button("Move to Own INI") {
                             Task { _ = await store.manageExtension(details, name: item.id, action: "separate-ini") }
                         }
                         .help("Move the load directive to its own INI file, keeping the extension’s enabled state")
@@ -166,10 +185,18 @@ private struct ExtensionsView: View {
                         Button("Remove…", role: .destructive) { removing = item }
                     }
                 }.padding(.vertical, 5).disabled(store.isBusy || store.isLoadingPHP)
-            }.listStyle(.inset)
+            }
+            .listStyle(.inset)
+            .overlay {
+                if details.extensions.isEmpty {
+                    ContentUnavailableView("No extensions found", systemImage: "puzzlepiece.extension")
+                } else if extensions.isEmpty {
+                    ContentUnavailableView.search(text: search)
+                }
+            }
             HStack(spacing: 8) {
                 ContextHelp(
-                    "New installations use a separate INI file per extension. Use Separate INI to move existing load directives out of php.ini and consolidate duplicates. Built-in modules cannot be removed; only PECL packages can be uninstalled here."
+                    "New installations use a separate INI file per extension. Use Move to Own INI to move existing load directives out of php.ini and consolidate duplicates. Built-in modules cannot be removed; only PECL packages can be uninstalled here."
                 )
                 Text(
                     "Built-in modules and extensions from other managers are kept separate from removable PECL packages."
@@ -195,6 +222,20 @@ private struct ExtensionsView: View {
             )
         }
     }
+}
+
+@ViewBuilder private func extensionStatusIcon(_ item: PHPExtension) -> some View {
+    let (symbol, color, label): (String, Color, String) =
+        if item.builtin {
+            ("shippingbox", .secondary, "Built in")
+        } else if item.enabled && item.loaded {
+            ("checkmark.circle.fill", .green, "Enabled")
+        } else if item.enabled {
+            ("exclamationmark.triangle.fill", .orange, "Enabled but not loaded")
+        } else {
+            ("circle", .secondary, "Disabled")
+        }
+    Image(systemName: symbol).foregroundStyle(color).frame(width: 18).help(label).accessibilityLabel(label)
 }
 
 private struct ExtensionInstaller: View {

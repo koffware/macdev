@@ -302,6 +302,17 @@ final class SiteStore: ObservableObject {
         }
     }
 
+    func dismissMessages() {
+        error = nil
+        warning = nil
+    }
+
+    func copyToPasteboard(_ value: String, label: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+        status = "Copied \(label)"
+    }
+
     func revealFile(_ path: String) {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }

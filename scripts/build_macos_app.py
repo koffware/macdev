@@ -12,6 +12,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Keep in sync with `platforms` in macos/Package.swift.
+MINIMUM_MACOS = "14.0"
+
 
 def build_icon(source: Path, destination: Path):
     """Package all standard macOS icon sizes from the original artwork."""
@@ -50,7 +53,9 @@ def build_icon(source: Path, destination: Path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--python", default=sys.executable, help="Backend Python interpreter (defaults to this Python)."
+        "--python",
+        default=None,
+        help="Backend Python interpreter (defaults to the project .venv if present, else this Python).",
     )
     parser.add_argument(
         "--disable-swift-sandbox",
@@ -58,29 +63,38 @@ def main():
         help="For environments that cannot run SwiftPM's nested build sandbox.",
     )
     args = parser.parse_args()
-    python = shutil.which(args.python)
+    root = Path(__file__).resolve().parent.parent
+    requested = args.python
+    if requested is None:
+        venv_python = root / ".venv/bin/python"
+        requested = str(venv_python) if venv_python.exists() else sys.executable
+    python = shutil.which(requested)
     if not python:
-        parser.error(f"Python interpreter not found: {args.python}")
+        parser.error(f"Python interpreter not found: {requested}")
     # Preserve venv symlinks: resolving them would lose the venv's site-packages.
     python = str(Path(python).absolute())
-    subprocess.run([python, "-c", "import click, rich"], check=True)
-    root = Path(__file__).resolve().parent.parent
+    if subprocess.run([python, "-c", "import click, rich"], check=False, capture_output=True).returncode != 0:
+        parser.error(
+            f"{python} cannot import click and rich. Install the backend first "
+            "(pip install -e .) or pass --python with an interpreter that has them."
+        )
     package = root / "macos"
     environment = os.environ.copy()
     environment.setdefault("CLANG_MODULE_CACHE_PATH", str(package / ".build/clang-cache"))
     environment.setdefault("SWIFTPM_MODULECACHE_OVERRIDE", str(package / ".build/swift-modules"))
-    # Use the installed macOS SDK for native control appearance while retaining
-    # the package's macOS 14 minimum deployment target.
-    # The default builder in the current toolchain records SDK 14 in the binary
-    # even with --sdk; the native builder correctly records the installed SDK.
+    # Link against the installed macOS SDK so AppKit enables the current control
+    # appearance, while keeping the package's macOS 14 minimum deployment target.
+    # SwiftPM's builder records the deployment target as the SDK version unless
+    # the linker is told the real SDK version explicitly.
     sdk = subprocess.check_output(["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True).strip()
+    sdk_version = subprocess.check_output(["xcrun", "--sdk", "macosx", "--show-sdk-version"], text=True).strip()
+    linker_platform = ["-platform_version", "macos", MINIMUM_MACOS, sdk_version]
     options = [
         "--package-path",
         str(package),
-        "--build-system",
-        "native",
         "--sdk",
         sdk,
+        *(argument for value in linker_platform for argument in ("-Xlinker", value)),
         "-c",
         "release",
         "--cache-path",
@@ -124,7 +138,7 @@ def main():
                 "CFBundleIconFile": "MacDev.icns",
                 "CFBundleShortVersionString": "0.1.0",
                 "CFBundleVersion": "1",
-                "LSMinimumSystemVersion": "14.0",
+                "LSMinimumSystemVersion": MINIMUM_MACOS,
                 "NSHighResolutionCapable": True,
             },
             output,
