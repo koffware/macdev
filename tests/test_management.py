@@ -171,7 +171,9 @@ def php_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(php, "runtime_paths", lambda version: runtime)
     service_rows = [{"name": "php@8.4", "status": "started"}]
     monkeypatch.setattr(php, "list_services", lambda: service_rows)
+    monkeypatch.setattr(php, "get_fpm_socket", lambda version: "127.0.0.1:9084")
     packages = {"redis": "6.0.0"}
+    extension_ini = {"opcache.enable": "1", "opcache.revalidate_freq": "2"}
     calls = []
 
     def run(command, **options):
@@ -196,7 +198,8 @@ def php_environment(tmp_path, monkeypatch):
             else:
                 _, entries = php.configuration_values(runtime)
                 loaded += sorted({entry["name"] for entry in entries if entry["enabled"]})
-                stdout = "\nMACDEV_MODULES:" + json.dumps(loaded)
+                ini = dict.fromkeys(php.EXTENSION_SETTING_KEYS, False) | extension_ini
+                stdout = "\nMACDEV_MODULES:" + json.dumps({"modules": loaded, "ini": ini, "release": "8.4.7"})
         elif "list-files" in command:
             module = "http" if command[-1] == "pecl_http" else command[-1]
             stdout = f"INSTALLED FILES\nTYPE INSTALL PATH\next /obsolete/Cellar/php/pecl/{module}.so\n"
@@ -589,3 +592,77 @@ def test_separate_ini_is_idempotent_and_api_exposes_the_action(php_environment):
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["data"]["changed"] is False
     assert not any(command[:2] == ["brew", "services"] for command, _ in calls)
+
+
+def test_php_details_reports_runtime_and_extension_settings(php_environment):
+    runtime, _, _, _ = php_environment
+    details = php.php_details("8.4")
+    assert details["release"] == "8.4.7"
+    assert details["binary"] == str(runtime.php)
+    assert details["fpm_listen"] == "127.0.0.1:9084"
+    # Extension settings are missing from `php-fpm -n -i`; the configured runtime supplies them.
+    assert details["settings"]["opcache.enable"] == "1"
+    assert details["settings"]["opcache.revalidate_freq"] == "2"
+    # Settings of extensions that are not loaded stay empty instead of guessed.
+    assert details["settings"]["xdebug.mode"] == ""
+
+
+def test_saving_a_subset_keeps_other_overrides_and_empty_removes_one(php_environment):
+    runtime, _, _, _ = php_environment
+    overlay = runtime.scan / "zzzz-macdev.ini"
+    overlay.write_text("; user note\nmemory_limit = 256M\ndate.timezone = UTC\n")
+    details = php.php_details("8.4")
+    php.save_settings("8.4", details["revision"], {"opcache.validate_timestamps": "Off", "date.timezone": ""})
+    text = overlay.read_text()
+    assert "memory_limit = 256M" in text
+    assert "opcache.validate_timestamps = 0" in text
+    assert "date.timezone" not in text
+    assert text.startswith("; user note")
+
+
+def test_upload_limits_are_checked_against_unchanged_values(php_environment):
+    details = php.php_details("8.4")
+    # post_max_size stays at the stubbed 8M, so a larger upload limit is rejected.
+    with pytest.raises(ValueError, match="POST size"):
+        php.save_settings("8.4", details["revision"], {"upload_max_filesize": "64M"})
+
+
+def test_every_managed_setting_has_a_validator():
+    assert set(php.SETTING_VALIDATORS) == set(php.SETTING_KEYS)
+
+
+@pytest.mark.parametrize(
+    "key,value,expected",
+    [
+        ("display_startup_errors", "yes", "On"),
+        ("opcache.enable", "Off", "0"),
+        ("error_reporting", "E_ALL  &  ~E_DEPRECATED", "E_ALL & ~E_DEPRECATED"),
+        ("date.timezone", "Europe/Chisinau", "Europe/Chisinau"),
+        ("xdebug.mode", "Debug, develop", "debug,develop"),
+        ("xdebug.start_with_request", "TRIGGER", "trigger"),
+        ("xdebug.client_port", "9003", "9003"),
+        ("max_input_time", "-1", "-1"),
+    ],
+)
+def test_new_php_settings_are_normalized(key, value, expected):
+    assert php.validate_settings({key: value}) == {key: expected}
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("error_reporting", "E_ALL; extension=evil"),
+        ("error_reporting", "E_EVERYTHING"),
+        ("date.timezone", "Mars/Olympus"),
+        ("date.timezone", "UTC\nextension=evil"),
+        ("xdebug.mode", "off,debug"),
+        ("xdebug.mode", "debug;evil"),
+        ("xdebug.client_port", "70000"),
+        ("opcache.memory_consumption", "4"),
+        ("max_file_uploads", "0"),
+        ("auto_prepend_file", "/tmp/x.php"),
+    ],
+)
+def test_new_php_settings_reject_unsafe_or_unknown_values(key, value):
+    with pytest.raises(ValueError):
+        php.validate_settings({key: value})

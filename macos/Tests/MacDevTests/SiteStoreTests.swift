@@ -20,6 +20,7 @@ final class SiteStoreTests: XCTestCase {
                   printf '%s' '{"protocol_version":1,"ok":false,"error":"Snapshot unavailable"}'
                   exit 1
                 fi
+                if [ -f "$0.snapshot" ]; then cat "$0.snapshot"; exit 0; fi
                 printf '%s' '{"protocol_version":1,"ok":true,"data":{"sites":[],"php_versions":["8.4","8.2"]}}'
                 ;;
               services)
@@ -27,6 +28,7 @@ final class SiteStoreTests: XCTestCase {
                   printf '%s' '{"protocol_version":1,"ok":false,"error":"Services unavailable"}'
                   exit 1
                 fi
+                if [ -f "$0.services" ]; then cat "$0.services"; exit 0; fi
                 printf '%s' '{"protocol_version":1,"ok":true,"data":{"services":[{"name":"nginx","status":"started"}]}}'
                 ;;
               php-details)
@@ -99,10 +101,13 @@ final class SiteStoreTests: XCTestCase {
 
         store.selection = "section:php"
         await store.refreshCurrentSection()
+        // The PHP page shows its FPM service status, so refreshing it re-reads services too.
+        XCTAssertEqual(try calls(executable, command: "php-details").count, 3)
+        XCTAssertEqual(try calls(executable, command: "services").count, 2)
         store.selection = "section:services"
         await store.refreshCurrentSection()
         XCTAssertEqual(try calls(executable, command: "php-details").count, 3)
-        XCTAssertEqual(try calls(executable, command: "services").count, 2)
+        XCTAssertEqual(try calls(executable, command: "services").count, 3)
     }
 
     @MainActor
@@ -211,5 +216,54 @@ final class SiteStoreTests: XCTestCase {
         store.phpVersion = "8.2"
         XCTAssertEqual(store.phpDetails?.version, "8.2", "Warmed versions are shown from the cache")
         XCTAssertEqual(try calls(executable, command: "php-details").count, 2)
+    }
+
+    @MainActor
+    func testServicesKnowWhichSitesDependOnThem() async throws {
+        let (executable, backend) = try fixture()
+        func site(_ domain: String, _ version: String?) -> [String: Any] {
+            [
+                "id": domain, "domain": domain, "root": "/p", "config_path": "/n/\(domain).conf",
+                "can_switch_php": true, "php_version": version ?? NSNull(),
+                "fpm": version.map { "127.0.0.1:90\($0.replacingOccurrences(of: ".", with: ""))" } ?? NSNull(),
+            ]
+        }
+        func write(_ data: [String: Any], to name: String) throws {
+            let response: [String: Any] = ["protocol_version": 1, "ok": true, "data": data]
+            let url = URL(fileURLWithPath: marker(executable, name))
+            try JSONSerialization.data(withJSONObject: response).write(to: url)
+        }
+        try write(
+            [
+                "sites": [site("b.test", "8.4"), site("a.test", "8.4"), site("static.test", nil)],
+                "php_versions": ["8.4", "8.3"], "php_services": ["8.4": "php", "8.3": "php@8.3"],
+            ], to: "snapshot")
+        let rows: [[String: Any]] = [
+            ["name": "nginx", "status": "started"], ["name": "php", "status": "started"],
+            ["name": "php@8.3", "status": "started"], ["name": "redis", "status": "error", "exit_code": 1],
+        ]
+        try write(["services": rows], to: "services")
+        let store = SiteStore(backend: backend)
+        await store.refresh()
+        let revision = store.servicesRevision
+        await store.loadServices()
+        XCTAssertGreaterThan(store.servicesRevision, revision, "Detail pages follow each services read")
+
+        func service(_ name: String) throws -> Service { try XCTUnwrap(store.services.first { $0.name == name }) }
+        XCTAssertEqual(
+            store.sites(dependingOn: try service("nginx"))?.map(\.domain), ["a.test", "b.test", "static.test"])
+        XCTAssertEqual(store.sites(dependingOn: try service("php"))?.map(\.domain), ["a.test", "b.test"])
+        XCTAssertEqual(store.sites(dependingOn: try service("php@8.3"))?.count, 0)
+        XCTAssertNil(store.sites(dependingOn: try service("redis")))
+        XCTAssertEqual(store.usageSummary(of: try service("nginx")), "Serves 3 sites")
+        XCTAssertEqual(store.usageSummary(of: try service("php")), "Used by 2 sites")
+        XCTAssertEqual(store.usageSummary(of: try service("php@8.3")), "No sites use PHP 8.3")
+        XCTAssertNil(store.usageSummary(of: try service("redis")))
+
+        store.selection = "section:services"
+        store.search = "zzz"
+        store.showSite(try XCTUnwrap(store.sites.first { $0.domain == "a.test" }))
+        XCTAssertEqual(store.selection, "a.test")
+        XCTAssertEqual(store.search, "", "The chosen site is visible in the sidebar")
     }
 }

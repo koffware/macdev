@@ -115,10 +115,58 @@ def get_active_version() -> str | None:
     return _version_from_binary("php")
 
 
+def get_cli_version() -> str | None:
+    """Return the version Homebrew links as `BREW/bin/php`, the default `php` in Terminal."""
+    return _version_from_binary(BREW / "bin/php")
+
+
+def use_cli_version(version: str) -> dict:
+    """Link VERSION's formula as Homebrew's `php`, restoring the previous links on failure."""
+    from .services import run_checked  # local import keeps the CLI import graph small
+
+    installed = get_installed_versions()
+    if version not in installed:
+        raise ValueError(f"PHP {version} is not installed.")
+    formulas = get_service_names(installed)
+    target = formulas[version]
+    linked = BREW / "var/homebrew/linked"
+    previous = [formula for formula in formulas.values() if (linked / formula).exists()]
+    if previous == [target] and get_cli_version() == version:
+        return {"changed": False, "warning": None}
+    try:
+        for formula in previous:
+            if formula != target:
+                run_checked(["brew", "unlink", formula], timeout=120)
+        # Versioned formulae are keg-only; --overwrite replaces files left by the previous link.
+        run_checked(["brew", "link", "--overwrite", "--force", target], timeout=180)
+        if get_cli_version() != version:
+            raise RuntimeError(f"Homebrew linked {target}, but {BREW / 'bin/php'} reports another version.")
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        restored = True
+        try:
+            if target not in previous and (linked / target).exists():
+                run_checked(["brew", "unlink", target], timeout=120)
+            for formula in previous:
+                run_checked(["brew", "link", "--overwrite", "--force", formula], timeout=180)
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            restored = False
+        if restored:
+            outcome = "The previous link was restored." if previous else "No PHP formula was linked before."
+        else:
+            outcome = f"Restoring the previous link also failed; run `brew link {' '.join(previous)}` in Terminal."
+        raise RuntimeError(f"Could not make PHP {version} the Terminal default. {outcome}\n{exc}") from exc
+    return {"changed": True, "warning": None}
+
+
 def get_service_name(version: str) -> str:
     """Return the brew service name for a version, e.g. '8.2' → 'php@8.2'."""
+    return get_service_names([version])[version]
+
+
+def get_service_names(versions: list[str]) -> dict[str, str]:
+    """Return brew service names for VERSIONS, probing the head formula only once."""
     head = _version_from_binary(BREW / "opt/php/bin/php")
-    return "php" if version == head else f"php@{version}"
+    return {version: "php" if version == head else f"php@{version}" for version in versions}
 
 
 def get_fpm_socket(version: str) -> str | None:

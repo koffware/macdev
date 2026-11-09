@@ -46,7 +46,9 @@ private struct WorkspaceCommands: Commands {
         CommandGroup(after: .newItem) {
             Button("Refresh") { Task { await store.refreshCurrentSection() } }
                 .keyboardShortcut("r")
-                .disabled(store.isStarting || store.isBusy || store.isLoadingPHP || store.isLoadingServices)
+                .disabled(
+                    store.isStarting || store.isBusy || store.isLoadingPHP || store.isLoadingServices
+                        || store.isLoadingDocker)
         }
     }
 }

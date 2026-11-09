@@ -30,6 +30,8 @@ def site(tmp_path, monkeypatch):
     sockets = {"8.2": "127.0.0.1:9082", "8.4": "/tmp/php84.sock"}
     monkeypatch.setattr("macdev.api.get_fpm_socket", sockets.get)
     monkeypatch.setattr("macdev.php.get_fpm_socket", sockets.get)
+    monkeypatch.setattr("macdev.api.get_service_names", lambda versions: {v: f"php@{v}" for v in versions})
+    monkeypatch.setattr("macdev.api.get_cli_version", lambda: "8.4")
     return conf
 
 
@@ -43,12 +45,16 @@ def test_snapshot_is_json_without_requirement_checks_or_writes(site):
     assert response["protocol_version"] == 1
     assert response["ok"] is True
     assert response["data"]["php_versions"] == ["8.2", "8.4"]
+    assert response["data"]["php_services"] == {"8.2": "php@8.2", "8.4": "php@8.4"}
+    assert response["data"]["php_cli_version"] == "8.4"
     row = response["data"]["sites"][0]
     assert row["id"] == "app.test"
     assert row["domain"] == "app.test"
     assert row["root"] == "/tmp/my project/public"
     assert row["php_version"] == "8.2"
     assert row["can_switch_php"] is True
+    assert row["root_exists"] is False
+    assert row["framework"] is None
     assert site.read_bytes() == original
 
 
@@ -152,3 +158,79 @@ def test_validation_failure_never_reloads_nginx():
     ):
         validate_and_reload()
     run.assert_called_once_with(["nginx", "-t"], capture_output=True, text=True, timeout=30, check=False)
+
+
+@pytest.fixture
+def homebrew_links(tmp_path, monkeypatch):
+    """A fake Homebrew prefix whose link state follows brew link/unlink calls."""
+    from macdev import php, services
+
+    linked = tmp_path / "var/homebrew/linked"
+    linked.mkdir(parents=True)
+    (linked / "php").touch()
+    monkeypatch.setattr(php, "BREW", tmp_path)
+    monkeypatch.setattr(php, "get_installed_versions", lambda: ["8.3", "8.5"])
+    monkeypatch.setattr(php, "get_service_names", lambda versions: {"8.3": "php@8.3", "8.5": "php"})
+    versions = {"php": "8.5", "php@8.3": "8.3"}
+    monkeypatch.setattr(php, "get_cli_version", lambda: next((versions[f.name] for f in linked.iterdir()), None))
+    calls = []
+    failures = set()
+
+    def run(command, **_options):
+        calls.append(command)
+        if tuple(command[:2]) in failures:
+            raise RuntimeError("brew failed")
+        if command[1] == "unlink":
+            (linked / command[-1]).unlink()
+        elif command[1] == "link":
+            (linked / command[-1]).touch()
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(services, "run_checked", run)
+    return linked, calls, failures
+
+
+def test_cli_default_relinks_homebrew_php(homebrew_links):
+    linked, calls, _ = homebrew_links
+    result = CliRunner().invoke(api, ["php-cli-default", "--version", "8.3"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["data"]["changed"] is True
+    assert calls == [["brew", "unlink", "php"], ["brew", "link", "--overwrite", "--force", "php@8.3"]]
+    assert sorted(path.name for path in linked.iterdir()) == ["php@8.3"]
+
+
+def test_cli_default_is_a_noop_when_already_linked(homebrew_links):
+    _, calls, _ = homebrew_links
+    result = CliRunner().invoke(api, ["php-cli-default", "--version", "8.5"])
+    assert json.loads(result.output)["data"]["changed"] is False
+    assert calls == []
+
+
+def test_failed_cli_default_restores_previous_link(homebrew_links):
+    _, _, failures = homebrew_links
+    failures.add(("brew", "link"))
+    result = CliRunner().invoke(api, ["php-cli-default", "--version", "8.3"])
+    response = json.loads(result.output)
+    assert result.exit_code == 1 and not response["ok"]
+    assert "Restoring the previous link also failed" in response["error"]
+    failures.clear()
+    result = CliRunner().invoke(api, ["php-cli-default", "--version", "8.3"])
+    assert json.loads(result.output)["ok"]
+
+
+def test_cli_default_rolls_back_when_link_reports_wrong_version(homebrew_links, monkeypatch):
+    from macdev import php
+
+    linked, _, _ = homebrew_links
+    monkeypatch.setattr(php, "get_cli_version", lambda: "8.5")
+    result = CliRunner().invoke(api, ["php-cli-default", "--version", "8.3"])
+    response = json.loads(result.output)
+    assert "previous link was restored" in response["error"]
+    assert sorted(path.name for path in linked.iterdir()) == ["php"]
+
+
+def test_cli_default_rejects_uninstalled_version(homebrew_links):
+    _, calls, _ = homebrew_links
+    result = CliRunner().invoke(api, ["php-cli-default", "--version", "7.4"])
+    assert "not installed" in json.loads(result.output)["error"]
+    assert calls == []

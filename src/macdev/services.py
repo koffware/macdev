@@ -7,14 +7,18 @@ import re
 import signal
 import subprocess
 
+SERVICE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9@+._/-]*")
 
-def run_checked(command, *, timeout=60, env=None, input=None):
+
+def run_checked(command, *, timeout=60, env=None, input=None, check=True, merge_stderr=False):
     process = subprocess.Popen(
         command,
         stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        # Merged output keeps the order of interleaved lines, as in container logs.
+        stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
         text=True,
+        errors="replace",
         env=env,
         start_new_session=True,
     )
@@ -33,8 +37,8 @@ def run_checked(command, *, timeout=60, env=None, input=None):
         raise RuntimeError(
             f"{' '.join(map(str, command))} timed out after {timeout} seconds. Refresh to inspect any partial changes."
         ) from exc
-    result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
-    if result.returncode:
+    result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr or "")
+    if check and result.returncode:
         detail = result.stderr.strip() or result.stdout.strip()
         raise RuntimeError(f"{' '.join(map(str, command))} failed:\n{detail}")
     return result
@@ -55,24 +59,39 @@ def list_services() -> list[dict]:
     ]
 
 
+def require_listed(name: str) -> None:
+    """Reject names Homebrew does not list, before they reach any command line."""
+    if not SERVICE_NAME.fullmatch(name):
+        raise ValueError("Invalid service name.")
+    if name not in {row["name"] for row in list_services()}:
+        raise ValueError("This service is not listed by Homebrew. Refresh and try again.")
+
+
+def is_php_service(name: str) -> bool:
+    return name == "php" or name.startswith("php@")
+
+
+def php_service_version(name: str) -> str:
+    """'php@8.2' → '8.2'; the head formula 'php' is asked for its version."""
+    from .config import BREW
+    from .php import _version_from_binary
+
+    version = name.removeprefix("php@") if name != "php" else _version_from_binary(BREW / "opt/php/bin/php")
+    if not version:
+        raise ValueError("Could not determine this PHP service's version.")
+    return version
+
+
 def service_action(name: str, action: str) -> dict:
     warning = None
     if action not in {"start", "stop", "restart", "reload"}:
         raise ValueError("Unsupported service action.")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9@+._/-]*", name):
-        raise ValueError("Invalid service name.")
-    if name not in {row["name"] for row in list_services()}:
-        raise ValueError("This service is not listed by Homebrew. Refresh and try again.")
+    require_listed(name)
     if name == "nginx" and action in {"start", "restart", "reload"}:
         run_checked(["nginx", "-t"], timeout=15)
-    if (name == "php" or name.startswith("php@")) and action in {"start", "restart", "reload"}:
-        from .config import BREW
-        from .php import _version_from_binary
+    if is_php_service(name) and action in {"start", "restart", "reload"}:
         from .php_configuration import runtime_paths, validate_fpm
 
-        version = name.removeprefix("php@") if name != "php" else _version_from_binary(BREW / "opt/php/bin/php")
-        if not version:
-            raise ValueError("Could not determine this PHP service's version.")
-        warning = validate_fpm(runtime_paths(version))
+        warning = validate_fpm(runtime_paths(php_service_version(name)))
     run_checked(["brew", "services", action, name])
     return {"services": list_services(), "warning": warning}

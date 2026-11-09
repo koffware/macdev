@@ -24,6 +24,26 @@ struct WorkspacePanel<Content: View>: View {
     }
 }
 
+/// A titled row inside a `WorkspacePanel`.
+struct DetailRow<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Text(title).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+            content
+        }
+        .frame(minHeight: 22)
+        .padding(16)
+    }
+}
+
 struct PathText: View {
     let value: String
 

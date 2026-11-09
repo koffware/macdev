@@ -5,22 +5,58 @@ import json
 import os
 import re
 import tempfile
+import zoneinfo
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from .php import _php_binary, get_installed_versions
+from .php import _php_binary, get_fpm_socket, get_installed_versions
 from .services import list_services, run_checked
 from .transactions import apply_changes
 
 SETTING_KEYS = (
     "memory_limit",
+    "max_execution_time",
+    "max_input_time",
+    "max_input_vars",
     "upload_max_filesize",
     "post_max_size",
-    "max_execution_time",
-    "max_input_vars",
+    "max_file_uploads",
     "display_errors",
+    "display_startup_errors",
+    "log_errors",
+    "error_reporting",
+    "date.timezone",
+    "opcache.enable",
+    "opcache.validate_timestamps",
+    "opcache.revalidate_freq",
+    "opcache.memory_consumption",
+    "xdebug.mode",
+    "xdebug.start_with_request",
+    "xdebug.client_port",
 )
+# Settings registered by extensions are absent from `php-fpm -n -i`; read their
+# effective values from the configured runtime instead.
+EXTENSION_SETTING_KEYS = tuple(key for key in SETTING_KEYS if key.startswith(("opcache.", "xdebug.")))
+ERROR_CONSTANTS = {
+    "E_ALL",
+    "E_ERROR",
+    "E_WARNING",
+    "E_PARSE",
+    "E_NOTICE",
+    "E_CORE_ERROR",
+    "E_CORE_WARNING",
+    "E_COMPILE_ERROR",
+    "E_COMPILE_WARNING",
+    "E_USER_ERROR",
+    "E_USER_WARNING",
+    "E_USER_NOTICE",
+    "E_STRICT",
+    "E_RECOVERABLE_ERROR",
+    "E_DEPRECATED",
+    "E_USER_DEPRECATED",
+}
+XDEBUG_MODES = {"off", "develop", "coverage", "debug", "gcstats", "profile", "trace"}
 
 
 @dataclass(frozen=True)
@@ -100,8 +136,9 @@ def configuration_values(runtime: Runtime) -> tuple[dict, list]:
     defaults = run_checked([str(runtime.fpm), "-n", "-i"], timeout=10, env=runtime.environment).stdout
     values = {}
     for key in SETTING_KEYS:
-        match = re.search(rf"^{key} => ([^\n]*?) =>", defaults, re.MULTILINE)
-        values[key] = match[1].strip() if match else ""
+        match = re.search(rf"^{re.escape(key)} => ([^\n]*?) =>", defaults, re.MULTILINE)
+        value = match[1].strip() if match else ""
+        values[key] = "" if value == "no value" else value
     entries = []
     for path in config_files(runtime):
         scoped = False
@@ -109,7 +146,7 @@ def configuration_values(runtime: Runtime) -> tuple[dict, list]:
             stripped = line.strip()
             if stripped.startswith("["):
                 scoped = bool(re.match(r"\[(PATH|HOST)\s*=", stripped, re.I))
-            setting = re.match(r"^\s*([a-z_]+)\s*=\s*(.*?)\s*$", line, re.I)
+            setting = re.match(r"^\s*([a-z_][a-z0-9_.]*)\s*=\s*(.*?)\s*$", line, re.I)
             if setting and not scoped and setting[1].lower() in (*SETTING_KEYS, "extension_dir"):
                 values[setting[1].lower()] = ini_value(setting[2])
             extension = re.match(r"^(\s*)(;\s*)?(zend_extension|extension)\s*=\s*(.*?)\s*$", line, re.I)
@@ -189,19 +226,29 @@ def php_details(version: str) -> dict:
         )
     script = "echo json_encode(get_loaded_extensions());"
     builtin = json.loads(run_checked([str(runtime.php), "-n", "-r", script], timeout=10).stdout)
+    probe = (
+        f"$keys = {json.dumps(list(EXTENSION_SETTING_KEYS))};"
+        'echo "\\nMACDEV_MODULES:", json_encode(["modules" => get_loaded_extensions(), '
+        '"ini" => array_combine($keys, array_map("ini_get", $keys)), "release" => PHP_VERSION]);'
+    )
     result = run_checked(
-        [str(runtime.php), "-c", str(runtime.ini), "-r", 'echo "\\nMACDEV_MODULES:";' + script],
+        [str(runtime.php), "-c", str(runtime.ini), "-r", probe],
         env=runtime.environment,
         timeout=15,
     )
     # Startup warnings may be printed to stdout when display_errors is enabled.
     try:
         prefix, encoded = result.stdout.rsplit("MACDEV_MODULES:", 1)
-        loaded = json.loads(encoded)
-    except (json.JSONDecodeError, ValueError) as exc:
+        state = json.loads(encoded)
+        loaded = state["modules"]
+    except (json.JSONDecodeError, ValueError, KeyError, TypeError) as exc:
         raise ValueError(
             f"PHP could not load its FPM configuration cleanly:\n{result.stderr or result.stdout}"
         ) from exc
+    for key, value in (state.get("ini") or {}).items():
+        # ini_get() returns false for settings of extensions that are not loaded.
+        if key in EXTENSION_SETTING_KEYS and not values.get(key) and isinstance(value, str):
+            values[key] = value
     builtin_names = {normalized_module(name) for name in builtin}
     loaded_names = {normalized_module(name) for name in loaded}
     packages = pecl_packages(runtime)
@@ -245,6 +292,9 @@ def php_details(version: str) -> dict:
         )
     return {
         "version": version,
+        "release": state.get("release"),
+        "binary": str(runtime.php),
+        "fpm_listen": get_fpm_socket(version),
         "ini_path": str(runtime.ini),
         "scan_directory": str(runtime.scan),
         "settings": {key: values[key] for key in SETTING_KEYS},
@@ -295,34 +345,125 @@ def apply_php_changes(runtime: Runtime, changes: Mapping[Path, bytes | None], ex
     return warning
 
 
-def validate_settings(values: dict) -> dict:
-    if not isinstance(values, dict) or set(values) != set(SETTING_KEYS):
-        raise ValueError("Provide the six supported PHP settings.")
-    values = {key: str(value).strip() for key, value in values.items()}
-    for key in ("memory_limit", "upload_max_filesize", "post_max_size"):
-        if not re.fullmatch(r"\d+[KMGkmg]?", values[key]) and not (key == "memory_limit" and values[key] == "-1"):
-            raise ValueError(f"{key} must be a size such as 128M, 1G, or a byte count.")
-    for key in ("max_execution_time", "max_input_vars"):
-        if not values[key].isdigit() or (key == "max_input_vars" and int(values[key]) < 1):
-            raise ValueError(f"{key} must be a valid nonnegative integer (max_input_vars must be positive).")
-    if values["display_errors"].lower() not in {"on", "off", "1", "0"}:
-        raise ValueError("display_errors must be On or Off.")
-    values["display_errors"] = "On" if values["display_errors"].lower() in {"on", "1"} else "Off"
+def size_in_bytes(value: str) -> int:
+    suffix = value[-1].upper()
+    return int(value[:-1]) * (1024 ** ("KMG".index(suffix) + 1)) if suffix in "KMG" else int(value)
 
-    def size(value):
-        suffix = value[-1].upper()
-        return int(value[:-1]) * (1024 ** ("KMG".index(suffix) + 1)) if suffix in "KMG" else int(value)
 
-    post, upload = size(values["post_max_size"]), size(values["upload_max_filesize"])
-    if post and post < upload:
+SIZE = re.compile(r"\d+[KMGkmg]?")
+MAX_PORT = 65535
+
+
+def _size(key: str, value: str) -> str:
+    if not SIZE.fullmatch(value) and not (key == "memory_limit" and value == "-1"):
+        raise ValueError(f"{key} must be a size such as 128M, 1G, or a byte count.")
+    return value
+
+
+def _whole_number(minimum: int, maximum: int | None = None):
+    def validate(key: str, value: str) -> str:
+        number = int(value) if re.fullmatch(r"-?\d+", value) else None
+        if number is None or number < minimum or (maximum is not None and number > maximum):
+            limit = f"between {minimum} and {maximum}" if maximum is not None else f"of at least {minimum}"
+            raise ValueError(f"{key} must be a whole number {limit}.")
+        return str(number)
+
+    return validate
+
+
+def _flag(on: str, off: str):
+    def validate(key: str, value: str) -> str:
+        lowered = value.lower()
+        if lowered not in {"on", "off", "1", "0", "yes", "no", "true", "false"}:
+            raise ValueError(f"{key} must be On or Off.")
+        return on if lowered in {"on", "1", "yes", "true"} else off
+
+    return validate
+
+
+def _error_reporting(key: str, value: str) -> str:
+    names = set(re.findall(r"[A-Z_]+", value))
+    if not re.fullmatch(r"[A-Z_0-9 &|~^()]+", value) or not names <= ERROR_CONSTANTS:
+        raise ValueError(f"{key} must combine E_* constants, for example E_ALL & ~E_DEPRECATED.")
+    return re.sub(r"\s+", " ", value)
+
+
+def _timezone(key: str, value: str) -> str:
+    known = zoneinfo.available_timezones()
+    shaped = re.fullmatch(r"[A-Za-z][A-Za-z0-9_+\-]*(?:/[A-Za-z0-9_+\-]+)*", value)
+    if not shaped or (known and value not in known):
+        raise ValueError(f"{key} must be a time zone such as UTC or Europe/Berlin.")
+    return value
+
+
+def _xdebug_mode(key: str, value: str) -> str:
+    modes = [mode.strip() for mode in value.lower().split(",")]
+    if not set(modes) <= XDEBUG_MODES or ("off" in modes and len(modes) > 1):
+        raise ValueError(f"{key} must be off, or a combination of develop, debug, coverage, profile, trace.")
+    return ",".join(modes)
+
+
+def _choice(*options: str):
+    def validate(key: str, value: str) -> str:
+        if value.lower() not in options:
+            raise ValueError(f"{key} must be one of: {', '.join(options)}.")
+        return value.lower()
+
+    return validate
+
+
+SETTING_VALIDATORS = {
+    "memory_limit": _size,
+    "max_execution_time": _whole_number(0),
+    "max_input_time": _whole_number(-1),
+    "max_input_vars": _whole_number(1),
+    "upload_max_filesize": _size,
+    "post_max_size": _size,
+    "max_file_uploads": _whole_number(1),
+    "display_errors": _flag("On", "Off"),
+    "display_startup_errors": _flag("On", "Off"),
+    "log_errors": _flag("On", "Off"),
+    "error_reporting": _error_reporting,
+    "date.timezone": _timezone,
+    "opcache.enable": _flag("1", "0"),
+    "opcache.validate_timestamps": _flag("1", "0"),
+    "opcache.revalidate_freq": _whole_number(0),
+    "opcache.memory_consumption": _whole_number(8),
+    "xdebug.mode": _xdebug_mode,
+    "xdebug.start_with_request": _choice("default", "trigger", "yes", "no"),
+    "xdebug.client_port": _whole_number(1, MAX_PORT),
+}
+
+
+def validate_setting(key: str, value: str) -> str:
+    """Return VALUE normalized for the INI file, or raise ValueError. Values never span lines.
+
+    An empty value removes MacDev's override, so the value from PHP's other INI files applies.
+    """
+    if key not in SETTING_VALIDATORS:
+        raise ValueError(f"{key} is not a setting MacDev manages.")
+    return value if value == "" else SETTING_VALIDATORS[key](key, value)
+
+
+def validate_settings(values: dict, current: Mapping[str, str] | None = None) -> dict:
+    """Validate a subset of SETTING_KEYS. CURRENT supplies unchanged values for cross-checks."""
+    if not isinstance(values, dict) or not values or not set(values) <= set(SETTING_KEYS):
+        raise ValueError("Provide one or more supported PHP settings.")
+    values = {key: validate_setting(key, str(value).strip()) for key, value in values.items()}
+    merged = {**(current or {}), **values}
+    post, upload = merged.get("post_max_size", ""), merged.get("upload_max_filesize", "")
+    sizes = SIZE.fullmatch(post) and SIZE.fullmatch(upload)
+    if sizes and size_in_bytes(post) and size_in_bytes(post) < size_in_bytes(upload):
         raise ValueError("Maximum POST size must be at least as large as the maximum upload size, or 0 for unlimited.")
     return values
 
 
 def save_settings(version: str, expected: str, values: dict) -> dict:
+    """Write only the given settings to MacDev's overlay; other overrides there stay as they are."""
     runtime = runtime_paths(version)
     require_revision(runtime, expected)
-    values = validate_settings(values)
+    current, _ = configuration_values(runtime)
+    values = validate_settings(values, current)
     path = runtime.scan / "zzzz-macdev.ini"
     if any(other.name > path.name for other in runtime.scan.glob("*.ini")):
         raise ValueError("A later INI file could override these settings. Rename or consolidate that file first.")
@@ -335,13 +476,10 @@ def save_settings(version: str, expected: str, values: dict) -> dict:
         raise ValueError(
             "The MacDev INI file contains scoped settings. Move those settings to a separate INI file first."
         )
-    content = "".join(
-        line
-        for line in content.splitlines(keepends=True)
-        if not re.match(r"^\s*(?:" + "|".join(SETTING_KEYS) + r")\s*=", line, re.I)
-    )
+    replaced = r"^\s*(?:" + "|".join(map(re.escape, values)) + r")\s*="
+    content = "".join(line for line in content.splitlines(keepends=True) if not re.match(replaced, line, re.I))
     content = content.rstrip() + "\n"
-    content += "\n".join(f"{key} = {values[key]}" for key in SETTING_KEYS) + "\n"
+    content += "".join(f"{key} = {values[key]}\n" for key in SETTING_KEYS if values.get(key))
     warning = apply_php_changes(runtime, {path: content.encode()}, expected=expected)
     return {"changed": True, "warning": warning}
 

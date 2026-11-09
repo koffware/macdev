@@ -50,12 +50,17 @@ macdev nginx reload | restart | stop | start | test
 - **`cli.py`** — entry point; assembles the command groups into the `macdev` root command
 - **`config.py`** — derives all paths from `brew --prefix` at import time; nothing is hardcoded
 - **`vhost.py`** — creates/removes/lists nginx server block configs; auto-detects `public/` subdirs; calls into `ssl.py` for cert generation and `php.py` for FPM socket lookup
-- **`php.py`** — discovers Homebrew PHP installs, reads `php-fpm.d/www.conf` to get the actual FPM listen socket, and switches vhost FPM addresses; single-site changes restore the previous config on validation/reload failure
+- **`php.py`** — discovers Homebrew PHP installs, reads `php-fpm.d/www.conf` to get the actual FPM listen socket, and switches vhost FPM addresses; single-site changes restore the previous config on validation/reload failure; links the Terminal `php` (`brew link`), restoring the previous link on failure
 - **`sites.py`** — structured site records parsed from existing nginx configs, shared by the CLI list and desktop API
+- **`projects.py`** — read-only project facts per site: project folder above `public/` and framework/version from `composer.lock` or marker files; never runs PHP or Composer
+- **`php_constraints.py`** — evaluates a composer.json `require.php` constraint against installed PHP release lines; unreadable constraints yield "unknown", never a guess
+- **`site_files.py`** — read-only certificate (expiry, covered names, missing files) and log facts from paths in a site's nginx config; log tails are bounded and only read paths named in that config
 - **`api.py`** — versioned JSON operations for site CRUD, PHP settings/extensions, and services, with structured errors and no interactive prompts
 - **`site_manager.py`** — creates/updates/removes sites, preserving custom rules and backing up removed configs
-- **`php_configuration.py`** — FPM defaults and per-version PECL extensions; preserve CLI/FPM configuration separation and package provenance
+- **`php_configuration.py`** — FPM defaults (saved per changed key to `zzzz-macdev.ini`; an empty value drops the override) and per-version PECL extensions; preserve CLI/FPM configuration separation and package provenance
 - **`services.py`** — Homebrew JSON status, validated service controls, and bounded child-process execution
+- **`service_facts.py`** — read-only per-service facts: process tree (PID, uptime, memory), listening ports via `lsof`, logs named by the launchd job or the service's own config (nginx, PHP-FPM), plain explanations of failures with Terminal commands MacDev never runs, and the service's own config test (`nginx -t`, `php-fpm -t`, `dnsmasq --test`)
+- **`docker.py`** — Docker containers, Compose projects (grouped by `com.docker.compose.*` labels), and images through the `docker` CLI; the app shows its section only when a CLI is found. Actions target only containers/images the engine lists, start projects in `depends_on` order, never pass `--force`, and never remove volumes; Compose itself is never run
 - **`transactions.py`** — atomic writes, rollback, directory locks, and stale-revision checks
 - **`ssl.py`** — thin wrapper around `mkcert`; certs stored at `~/.macdev/certs/<domain_with_underscores>.pem`
 - **`nginx.py`** — runs `nginx -t` before every reload to prevent broken configs from being applied
@@ -70,6 +75,7 @@ for the native bridge. Use temporary configs and stub nginx/Homebrew operations 
 do not switch real sites, restart services, or install/uninstall extensions merely to
 validate the UI. PHP settings apply to FPM defaults, not php-cli.ini. Keep built-in
 modules and modules from other managers separate from uninstallable PECL packages.
+Docker tests stub the `docker` CLI; never start, stop, or remove real containers to validate the UI.
 Site removal keeps a recoverable configuration backup and never removes project files
 or certificates. Certificate generation requires an existing mkcert authority; trust
 setup remains an explicit Terminal operation.

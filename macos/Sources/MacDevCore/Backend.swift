@@ -42,6 +42,46 @@ public struct Backend: Sendable {
         try await request(["service-action", "--service", service.name, "--action", action])
     }
 
+    public func serviceDetails(name: String) async throws -> ServiceDetails {
+        try await request(["service-details", "--service", name])
+    }
+
+    /// The last lines of a log the service writes; the backend derives the path from the service.
+    public func serviceLog(name: String, kind: String, lines: Int = 40) async throws -> LogTail {
+        try await request(["service-log", "--service", name, "--kind", kind, "--lines", String(lines)])
+    }
+
+    public func checkService(name: String) async throws -> ServiceCheck {
+        try await request(["service-check", "--service", name])
+    }
+
+    /// The last lines of a site's access or error log; the backend reads the path from the site's config.
+    public func siteLog(siteID: String, kind: String, lines: Int = 40) async throws -> LogTail {
+        try await request(["site-log", "--site", siteID, "--kind", kind, "--lines", String(lines)])
+    }
+
+    public func docker() async throws -> DockerState { try await request(["docker"]) }
+
+    /// start, stop, restart, or remove one container; the backend refuses containers Docker does not list.
+    public func dockerContainerAction(id: String, action: String) async throws -> DockerState {
+        try await request(["docker-container", "--id", id, "--action", action])
+    }
+
+    /// start, stop, or restart every container of a Compose project, in dependency order.
+    public func dockerProjectAction(name: String, action: String) async throws -> DockerState {
+        try await request(["docker-project", "--name", name, "--action", action])
+    }
+
+    public func removeDockerImage(id: String) async throws -> DockerState {
+        try await request(["docker-image", "--id", id, "--action", "remove"])
+    }
+
+    public func pruneDockerImages() async throws -> DockerState { try await request(["docker-prune-images"]) }
+
+    public func containerLog(id: String, lines: Int = 200) async throws -> ContainerLog {
+        try await request(["docker-log", "--id", id, "--lines", String(lines)])
+    }
+
     public func phpDetails(version: String) async throws -> PHPDetails {
         try await request(["php-details", "--version", version])
     }
@@ -54,6 +94,11 @@ public struct Backend: Sendable {
             "php-settings", "--version", details.version,
             "--revision", details.revision, "--values", json,
         ])
+    }
+
+    /// Link VERSION as Homebrew's `php` command.
+    public func useInTerminal(version: String) async throws -> PHPChange {
+        try await request(["php-cli-default", "--version", version])
     }
 
     public func extensionAction(_ details: PHPDetails, name: String, action: String) async throws -> PHPChange {
